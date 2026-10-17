@@ -1,0 +1,11 @@
+{
+  "name": "scan-walk",
+  "short_name": "scan-walk",
+  "description": "USDZ 방 스캔을 조이스틱으로 걸어 다니며 보기",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "icons": [{ "src": "icon.png", "sizes": "512x512", "type": "image/png" }]
+}
