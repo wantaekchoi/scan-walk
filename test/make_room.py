@@ -3,7 +3,8 @@
 Room 6m (x) x 5m (z), walls 2.6m, door gap (0.9m x 2.1m) in the +z wall,
 box obstacle 1m cube at (1.8, 0, -1.2), step 0.18m platform at x in [-3,-1.5], z in [-2.5,-0.5].
 Outputs: room_y.usdz (upAxis Y), room_z.usdz (Z-up geometry, upAxis Z),
-room_z_mislabeled.usdz (Z-up geometry, upAxis Y declared), room_cm.usdz (centimetres, metersPerUnit 0.01).
+room_z_mislabeled.usdz (Z-up geometry, upAxis Y declared), room_cm.usdz (centimetres, metersPerUnit 0.01),
+room_nofloor.usdz (no floor under the centre), room_8k.usdz (8192px texture).
 """
 import os, sys, zipfile
 from PIL import Image, ImageDraw
@@ -25,8 +26,8 @@ for name, (qx, qy, (r, g, b)) in quads.items():
             x0, y0 = qx * 256 + i * 32, qy * 256 + j * 32
             d.rectangle([x0, y0, x0 + 31, y0 + 31], fill=(int(r * k), int(g * k), int(b * k)))
     d.rectangle([qx * 256, qy * 256, qx * 256 + 255, qy * 256 + 255], outline=(20, 20, 20), width=3)
-tex = os.path.join(out, 'texture.png')
-img.save(tex)
+img.save(os.path.join(out, 'texture.png'))
+img.resize((8192, 8192), Image.NEAREST).save(os.path.join(out, 'texture8k.png'))
 
 def uvq(name):  # UV rect of a quadrant; PNG row 0 is top, USD v=0 is bottom
     qx, qy, _ = quads[name]
@@ -67,7 +68,8 @@ quad((-1.0, 0, Z + 1.5), (1.0, 0, Z + 1.5), (1.0, 0, Z), (-1.0, 0, Z), 'floor')
 box(1.3, 0, -1.7, 2.3, 1.0, -0.7, 'box')
 box(-3.0, 0, -2.5, -1.5, 0.18, -0.5, 'step')
 
-def write(name, up, mpu, transform):
+def write(name, up, mpu, transform, tex='texture.png', drop_floor=False):
+    f = 1 if drop_floor else 0  # the room floor is the first quad
     layer = os.path.join(out, name + '.usdc')
     stage = Usd.Stage.CreateNew(layer)
     UsdGeom.SetStageUpAxis(stage, up)
@@ -76,11 +78,11 @@ def write(name, up, mpu, transform):
     stage.SetDefaultPrim(root.GetPrim())
     mesh = UsdGeom.Mesh.Define(stage, '/Room/Scan')
     mesh.CreatePointsAttr([Gf.Vec3f(*transform(p)) for p in pts])
-    mesh.CreateFaceVertexCountsAttr(counts)
-    mesh.CreateFaceVertexIndicesAttr(idx)
+    mesh.CreateFaceVertexCountsAttr(counts[f:])
+    mesh.CreateFaceVertexIndicesAttr(idx[4 * f:])
     mesh.CreateSubdivisionSchemeAttr('none')
     pv = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar('st', Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.faceVarying)
-    pv.Set([Gf.Vec2f(*u) for u in st])
+    pv.Set([Gf.Vec2f(*u) for u in st[4 * f:]])
     mat = UsdShade.Material.Define(stage, '/Room/Looks/Mat')
     sh = UsdShade.Shader.Define(stage, '/Room/Looks/Mat/PBR')
     sh.CreateIdAttr('UsdPreviewSurface')
@@ -90,7 +92,7 @@ def write(name, up, mpu, transform):
     rd.CreateInput('varname', Sdf.ValueTypeNames.Token).Set('st')
     tx = UsdShade.Shader.Define(stage, '/Room/Looks/Mat/Tex')
     tx.CreateIdAttr('UsdUVTexture')
-    tx.CreateInput('file', Sdf.ValueTypeNames.Asset).Set('texture.png')
+    tx.CreateInput('file', Sdf.ValueTypeNames.Asset).Set(tex)
     tx.CreateInput('st', Sdf.ValueTypeNames.Float2).ConnectToSource(rd.ConnectableAPI(), 'result')
     tx.CreateOutput('rgb', Sdf.ValueTypeNames.Float3)
     sh.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).ConnectToSource(tx.ConnectableAPI(), 'rgb')
@@ -109,3 +111,5 @@ write('room_y', UsdGeom.Tokens.y, 1.0, lambda p: p)
 write('room_z', UsdGeom.Tokens.z, 1.0, zup)
 write('room_z_mislabeled', UsdGeom.Tokens.y, 1.0, zup)
 write('room_cm', UsdGeom.Tokens.y, 0.01, lambda p: tuple(c * 100 for c in p))
+write('room_nofloor', UsdGeom.Tokens.y, 1.0, lambda p: p, drop_floor=True)
+write('room_8k', UsdGeom.Tokens.y, 1.0, lambda p: p, tex='texture8k.png')

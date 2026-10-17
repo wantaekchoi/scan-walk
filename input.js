@@ -5,7 +5,7 @@ export function setupInput(canvas, stickEl, onTeleport) {
   const s = { yaw: 0, pitch: 0, move: { x: 0, y: 0 }, up: 0, buttonUp: 0 };
   const keys = new Set();
   const ptrs = new Map(); // pointerId -> { x, y, x0, y0, t0, stick }
-  let lastTap = null, lockedAt = 0;
+  let lastTap = null, lockedAt = 0, lastType = '';
   const stickVec = { x: 0, y: 0 };
 
   const look = (dx, dy, k) => {
@@ -16,9 +16,15 @@ export function setupInput(canvas, stickEl, onTeleport) {
     stickEl.style.transform = `translate(${x}px, ${y}px)`;
     stickEl.firstElementChild.style.transform = `translate(${kx}px, ${ky}px)`;
   };
+  const hideStick = () => {
+    stickVec.x = stickVec.y = 0;
+    stickEl.classList.remove('on');
+    stickEl.style.transform = stickEl.firstElementChild.style.transform = '';
+  };
 
   canvas.addEventListener('pointerdown', e => {
     try { canvas.setPointerCapture(e.pointerId); } catch {} // throws while pointer-locked
+    lastType = e.pointerType;
     const touch = e.pointerType !== 'mouse';
     const stick = touch && e.clientX < innerWidth * 0.45 && ![...ptrs.values()].some(p => p.stick);
     ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now(), stick });
@@ -50,11 +56,7 @@ export function setupInput(canvas, stickEl, onTeleport) {
     const p = ptrs.get(e.pointerId);
     if (!p) return;
     ptrs.delete(e.pointerId);
-    if (p.stick) {
-      stickVec.x = stickVec.y = 0;
-      stickEl.classList.remove('on');
-      stickEl.style.transform = stickEl.firstElementChild.style.transform = '';
-    }
+    if (p.stick) hideStick();
     const tap = e.type === 'pointerup' && performance.now() - p.t0 < TAP_MS &&
       Math.hypot(e.clientX - p.x0, e.clientY - p.y0) < TAP_PX;
     if (!tap) return;
@@ -80,6 +82,7 @@ export function setupInput(canvas, stickEl, onTeleport) {
     lockedAt = document.pointerLockElement === canvas ? performance.now() : 0;
   });
   canvas.addEventListener('dblclick', e => {
+    if (lastType !== 'mouse') return; // touch double-taps are handled above; browsers also send dblclick for them
     // locked for a while: aim with the crosshair; just locked by this double-click: where it was clicked
     const center = lockedAt && performance.now() - lockedAt > 600;
     onTeleport(center ? innerWidth / 2 : e.clientX, center ? innerHeight / 2 : e.clientY);
@@ -87,7 +90,16 @@ export function setupInput(canvas, stickEl, onTeleport) {
 
   addEventListener('keydown', e => { if (!e.repeat) keys.add(e.code); });
   addEventListener('keyup', e => keys.delete(e.code));
-  addEventListener('blur', () => keys.clear());
+  // app switch / notification: drop held keys, fingers and the fly button so nothing keeps moving
+  const reset = () => {
+    keys.clear();
+    ptrs.clear();
+    lastTap = null;
+    s.buttonUp = 0;
+    hideStick();
+  };
+  addEventListener('blur', reset);
+  document.addEventListener('visibilitychange', () => document.hidden && reset());
 
   // call once per frame: merges stick/keys into s.move and s.up
   s.poll = () => {

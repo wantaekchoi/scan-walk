@@ -2,6 +2,8 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
+<!-- the scan never leaves the page: no fetch/XHR/WebSocket/beacon, images only from here or the file itself -->
+<meta http-equiv="Content-Security-Policy" content="connect-src 'none'; img-src 'self' blob: data:">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -37,7 +39,8 @@
   #intro h1 { margin: 0; font-size: 22px; font-weight: 600; }
   #intro p { margin: 0; max-width: 30em; color: #aaa; word-break: keep-all; }
   #intro-open { padding: 14px 28px; font-size: 18px; }
-  #msg { color: #f99; }
+  #intro #msg { color: #f99; }
+  #toast { position: fixed; left: 50%; bottom: max(24px, env(safe-area-inset-bottom)); transform: translateX(-50%); max-width: calc(100% - 32px); padding: 10px 14px; border-radius: 10px; background: rgba(60, 20, 20, .9); color: #fdd; pointer-events: none; }
   #busy .spin { width: 34px; height: 34px; border: 3px solid rgba(255, 255, 255, .2); border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(1turn); } }
 </style>
@@ -47,6 +50,16 @@
     "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
     "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.16/build/index.module.js"
+  },
+  "integrity": {
+    "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js": "sha384-m8JoFX52V6NGv2usipnlLJKnJfL7IE8dbniPDDCSGSQv3Hm4n6PjfV6syVwfuoRc",
+    "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.js": "sha384-mdKeCwPEcbDvzaxwhm+MVuLoMou+E7jQqrs4tmu/n8HBYPGI1kZt0MkJxlMR4zFM",
+    "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/loaders/USDLoader.js": "sha384-vb6C/CawIvaplMz2OmvP4v9c/Nl6UI34i+g7lhNJ9UzZ6eJ1qK9F1NM4rXKx1rFG",
+    "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/loaders/usd/USDAParser.js": "sha384-e6733k5TMrckgvAJsa1Q2gWVcfLBAs/eXUAViBZD1bKmn+R801vNmC19bJwMOROS",
+    "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/loaders/usd/USDCParser.js": "sha384-jtNzQ/A2LAXMgcV+53Fk4i62KvSbeSm2ffu/9TgZEhMo+4VnXWecGdlMVj1IcBGM",
+    "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/loaders/usd/USDComposer.js": "sha384-Gfig92tDYhqYeB6ywjxicuNEg2uS9Im7uTZKs2LkmMz0fW77jVFCIi7LTi10wNx9",
+    "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/libs/fflate.module.js": "sha384-WfAf3P1ihuiJhAj/FmfdKxOqoKSzTJ1JQEyTB4vuhzg+4QYUKf4Abi6Bijn0sbr6",
+    "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.16/build/index.module.js": "sha384-G+hx/I3hYul0/37Q6Ntxn6TLNj8y1E2PC5g4dmBSi2kgY7LjfhT987Xcz+7j2Hb3"
   }
 }
 </script>
@@ -63,6 +76,7 @@
   <button id="axis">축 +Y</button>
   <button id="scale">×1</button>
   <button id="reset">처음</button>
+  <button id="forget" hidden>잊기</button>
 </div>
 <div id="updown"><button id="up" aria-label="위로">▲</button><button id="down" aria-label="아래로">▼</button></div>
 <div id="intro">
@@ -72,7 +86,9 @@
   <p>폰: 왼쪽 엄지로 이동, 오른쪽 드래그로 시점, 바닥 두 번 탭으로 순간이동.<br>
      PC: 파일을 끌어다 놓기. 클릭 후 마우스로 시점, WASD 이동, 더블클릭 순간이동, 비행 중 Space/Shift 위아래.</p>
   <p id="msg"></p>
+  <p id="again" hidden><button id="reopen">다시 열기</button> <button id="again-forget">잊기</button></p>
 </div>
+<div id="toast" hidden></div>
 <div id="busy" hidden><div class="spin"></div><div id="busy-text"></div></div>
 <!-- no accept filter: iOS greys out .usdz with some accept values -->
 <input type="file" id="file" hidden>

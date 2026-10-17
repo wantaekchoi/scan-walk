@@ -13,6 +13,7 @@ export class Player {
   vy = 0;
   fly = false;
   grounded = false;
+  lastFloor = null; // where the feet last stood, for climbing back out of a hole
   bvh = null; // MeshBVH of the world-space collider
 
   // move: {x: right, y: forward} with length <= 1, up: -1..1, yaw: camera yaw
@@ -21,7 +22,8 @@ export class Player {
     if (!this.fly && this.grounded && !move.x && !move.y) return;
     const s = Math.sin(yaw), c = Math.cos(yaw);
     dir.set(move.x * c - move.y * s, 0, -move.x * s - move.y * c);
-    const n = Math.ceil((WALK * dt) / (R / 2)); // substeps well under the radius so thin walls can't be skipped
+    // substeps well under the radius so thin walls and floors can't be skipped, falling included
+    const n = Math.ceil((Math.max(WALK, Math.abs(this.vy) - GRAVITY * dt) * dt) / (R / 2));
     const h = dt / n;
     for (let i = 0; i < n; i++) {
       if (this.fly) {
@@ -76,6 +78,7 @@ export class Player {
     if (this.grounded) {
       p.y = hit.point.y;
       this.vy = 0;
+      (this.lastFloor ??= new Vector3()).copy(p);
     }
   }
 }
