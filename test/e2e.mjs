@@ -62,6 +62,30 @@ const saved = page => page.evaluate(() => new Promise(res => {
   };
 }));
 const marker = page => page.evaluate(() => localStorage.getItem('scan-walk-opening'));
+// small object scan (0.6m cube): flying outside it with the whole box on screen, and 처음 comes back to that view
+async function objectView(page, tag) {
+  await load(page, 'object.usdz');
+  const s = await state(page);
+  const v = await page.evaluate(() => new Promise(res => requestAnimationFrame(() => { // right after the app's render, before the frame is cleared
+    const { bounds, camera } = window.app, { min, max } = bounds;
+    const pts = [0, 1, 2, 3, 4, 5, 6, 7].map(i => min.clone().set(i & 1 ? max.x : min.x, i & 2 ? max.y : min.y, i & 4 ? max.z : min.z));
+    pts.push(bounds.getCenter(min.clone()));
+    const inView = pts.every(p => { p.project(camera); return Math.abs(p.x) <= 1 && Math.abs(p.y) <= 1 && Math.abs(p.z) < 1; });
+    const g = document.createElement('canvas').getContext('2d');
+    g.canvas.width = g.canvas.height = 64;
+    g.drawImage(document.getElementById('c'), 0, 0, 64, 64);
+    const px = g.getImageData(0, 0, 64, 64).data;
+    let fg = 0; // pixels that aren't the 0x111111 background
+    for (let i = 0; i < px.length; i += 4) fg += Math.abs(px[i] - 17) + Math.abs(px[i + 1] - 17) + Math.abs(px[i + 2] - 17) > 30;
+    res({ inView, outside: !bounds.containsPoint(camera.position), drawn: +(fg / 4096).toFixed(3) });
+  })));
+  check(`${tag}: small object starts flying outside it, whole box in view and drawn`, s.fly && (await page.textContent('#mode')) === '비행' && v.inView && v.outside && v.drawn > 0.05, { ...v, pos: s.pos, centre: s.centre });
+  await shot(page, `${tag}-object`);
+  await place(page, 3, 1, 3, 1, -0.5);
+  await click(page, '#reset');
+  const r = await state(page);
+  check(`${tag}: 처음 returns to the same object view`, r.fly && ['pos', 'yaw', 'pitch'].every(k => `${r[k]}` === `${s[k]}`), { start: s, reset: r });
+}
 
 // ---------- desktop ----------
 {
@@ -167,6 +191,7 @@ const marker = page => page.evaluate(() => localStorage.getItem('scan-walk-openi
   await shot(page, 'd5-lit');
   await click(page, '#light');
 
+  await objectView(page, 'desktop');
   await load(page, 'room_z.usdz');
   s = await state(page);
   check('room_z (upAxis Z) upright by loader; back in walk mode', near(s.size[1], 2.6, 0.01) && near(s.start[1], 0, 0.01) && !s.fly, s);
@@ -360,6 +385,7 @@ const marker = page => page.evaluate(() => localStorage.getItem('scan-walk-openi
   await touch('touchEnd', []);
   s = await state(page);
   check('touch: fly up button rises', s.fly && s.pos[1] > y0 + 0.5, { y0, y: s.pos[1] });
+  await objectView(page, 'touch');
   const scroll = await page.evaluate(() => [scrollX, scrollY, document.documentElement.scrollHeight <= innerHeight]);
   check('touch: page did not scroll', scroll[0] === 0 && scroll[1] === 0 && scroll[2], scroll);
   const unexpected = warnings.filter(w => !w.includes('메시가 없습니다') && !w.includes('USDAParser'));

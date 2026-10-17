@@ -132,8 +132,13 @@ function rebuild() {
   // start: floor under the bounding box centre, or flying with the eye at the centre when there is none
   bounds.getCenter(raycaster.ray.origin);
   raycaster.ray.direction.set(0, -1, 0);
-  const hit = player.bvh.raycastFirst(raycaster.ray, THREE.DoubleSide);
+  const size = bounds.getSize(new THREE.Vector3());
+  // object, not a room: under ~2m (door height, two strides) across both ways, or narrow one way and low (a slide, a car)
+  const object = Math.max(size.x, size.z) < 2 || (size.y < 2 && Math.min(size.x, size.z) < 2);
+  const hit = !object && player.bvh.raycastFirst(raycaster.ray, THREE.DoubleSide);
   startOnFloor = !!hit;
+  // object: fly at its centre's height, backed off along +z (yaw 0 looks at it) until its bounding sphere fits the narrower FOV
+  if (object) raycaster.ray.origin.z += size.length() / 2 / Math.sin(Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(camera.aspect, 1)));
   start.copy(hit ? hit.point : raycaster.ray.origin.setY(raycaster.ray.origin.y - EYE));
   $('axis').textContent = `축 ${AXES[axis][0]}`;
   $('scale').textContent = `×${SCALES[scale]}`;
@@ -259,7 +264,7 @@ function idb(mode, fn) {
   });
 }
 
-window.app = { player, input, open, bounds, start }; // for tests and the console
+window.app = { player, input, open, bounds, start, camera }; // for tests and the console
 
 // Set while reopening the saved scan, cleared once a few frames are drawn. Still there at start-up means
 // that attempt killed the tab (usually memory), so ask instead of crashing in a loop.

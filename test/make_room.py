@@ -4,7 +4,8 @@ Room 6m (x) x 5m (z), walls 2.6m, door gap (0.9m x 2.1m) in the +z wall,
 box obstacle 1m cube at (1.8, 0, -1.2), step 0.18m platform at x in [-3,-1.5], z in [-2.5,-0.5].
 Outputs: room_y.usdz (upAxis Y), room_z.usdz (Z-up geometry, upAxis Z),
 room_z_mislabeled.usdz (Z-up geometry, upAxis Y declared), room_cm.usdz (centimetres, metersPerUnit 0.01),
-room_nofloor.usdz (no floor under the centre), room_8k.usdz (8192px texture).
+room_nofloor.usdz (no floor under the centre), room_8k.usdz (8192px texture),
+object.usdz (closed 0.6m cube, centre (0.5, 0.3, -0.2): an object scan, not a room).
 """
 import os, sys, zipfile
 from PIL import Image, ImageDraw
@@ -113,3 +114,9 @@ write('room_z_mislabeled', UsdGeom.Tokens.y, 1.0, zup)
 write('room_cm', UsdGeom.Tokens.y, 0.01, lambda p: tuple(c * 100 for c in p))
 write('room_nofloor', UsdGeom.Tokens.y, 1.0, lambda p: p, drop_floor=True)
 write('room_8k', UsdGeom.Tokens.y, 1.0, lambda p: p, tex='texture8k.png')
+
+# object scan: one closed box, so a ray down from its centre hits its bottom like on a real scanned thing
+del pts[:], counts[:], idx[:], st[:]
+box(0.2, 0, -0.5, 0.8, 0.6, 0.1, 'box')
+quad((0.2, 0, -0.5), (0.8, 0, -0.5), (0.8, 0, 0.1), (0.2, 0, 0.1), 'box')  # bottom
+write('object', UsdGeom.Tokens.y, 1.0, lambda p: p)

@@ -12,6 +12,7 @@
 마지막으로 연 파일은 다음에 바로 열리도록 이 브라우저의 IndexedDB 에만 저장된다.
 지우려면 앱의 `잊기` 버튼을 누르거나, iPhone 설정 > Safari > 고급 > 웹사이트 데이터에서 이 사이트를 지운다.
 다시 열다가 탭이 죽으면(메모리 부족) 다음 실행 때 자동으로 열지 않고 `다시 열기`/`잊기` 를 묻는다.
+Safari 개인정보 보호 탭에서는 마지막 파일을 기억하지 못한다(WebKit 은 비공개 세션에서 IndexedDB 에 파일을 넣지 못한다). 앱은 그대로 쓸 수 있다.
 
 ## 쓰는 법
 
@@ -43,6 +44,7 @@ WASD·방향키로 이동하고, 더블클릭하면 그 바닥으로 순간이�
 
 파일에 적힌 `upAxis`·`metersPerUnit` 는 자동으로 따른다. 축·배율 버튼은 그게 틀렸을 때 쓰는 손 보정이다.
 눈높이는 1.6m, 넘을 수 있는 턱은 0.3m 까지다. 시작점 아래에 바닥이 없으면 비행으로 시작하고, 구멍으로 떨어지면 마지막으로 서 있던 자리로 돌아온다.
+가로·세로가 모두 2m 미만이거나 폭과 높이가 둘 다 2m 미만인 물체 스캔(미끄럼틀·자동차 등)은 비행으로, 물체 밖에서 그 중심 높이로 물체를 바라보며 시작한다(`처음` 도 그 자리).
 텍스처는 4096px 로 줄여 올린다(iOS 메모리 한도).
 
 ## 직접 띄우기
@@ -53,7 +55,7 @@ WASD·방향키로 이동하고, 더블클릭하면 그 바닥으로 순간이�
 python3 -m http.server
 ```
 
-`test/room.usdz` 는 시험용 합성 방(바닥·벽 4개·문틈·상자·0.18m 단)이다. `python test/make_room.py <폴더>` 가 만든 `room_y.usdz` 이고, Z-up·잘못 표기된 Z-up·cm 단위·바닥 없음·8k 텍스처 변형도 같이 만든다(`pip install usd-core pillow`).
+`test/room.usdz` 는 시험용 합성 방(바닥·벽 4개·문틈·상자·0.18m 단)이다. `python test/make_room.py <폴더>` 가 만든 `room_y.usdz` 이고, Z-up·잘못 표기된 Z-up·cm 단위·바닥 없음·8k 텍스처 변형과 0.6m 물체(`object.usdz`)도 같이 만든다(`pip install usd-core pillow`).
 자동 검사: `python test/make_room.py /tmp/rooms` 후 서버를 8765 에 띄우고 `ASSETS=/tmp/rooms node test/e2e.mjs`(Playwright 필요, 다른 주소·브라우저는 `BASE_URL`·`CHROMIUM`, 설명은 파일 첫머리).
 
 ## 만든 것
