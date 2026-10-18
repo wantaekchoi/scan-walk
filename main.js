@@ -22,7 +22,7 @@ const fix = new THREE.Group(); // manual axis/scale correction on top of the fil
 scene.add(fix);
 
 const player = new Player();
-const input = setupInput(canvas, [$('lstick'), $('rstick')], teleport);
+const input = setupInput(canvas, $('stick'), teleport);
 const start = new THREE.Vector3();
 const bounds = player.bounds;
 const raycaster = new THREE.Raycaster();
@@ -249,9 +249,9 @@ renderer.setAnimationLoop(t => {
   timer.update(t);
   const dt = Math.min(timer.getDelta(), 0.1);
   if (player.bvh) {
-    input.poll(dt);
-    if (input.up > 0.5 && !player.fly) setFly(true); // left stick well up / Space while walking takes off
-    player.update(dt, input.move, input.up, input.yaw);
+    input.poll();
+    if (input.up > 0 && !player.fly) setFly(true); // Space/E while walking takes off; on a phone it's the mode button
+    player.update(dt, input.move, input.up, input.yaw, input.pitch);
     if (!player.fly && player.pos.y < bounds.min.y - 10) { // walked into a hole: back to where we last stood (flying goes anywhere)
       if (player.lastFloor) {
         player.pos.copy(player.lastFloor);

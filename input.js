@@ -1,18 +1,18 @@
-// Keyboard, mouse (pointer lock or drag), double-tap, and drone Mode 2 touch: two thumb sticks in the lower half
-// (left: up/down = height, sideways = turn; right: move), look drag (camera tilt and turn) in the upper half.
-// DEAD/EXPO/YAW_RATE: per-axis dead zone, expo curve and top turn rate, after DJI's defaults (expo 0.25, 75°/s)
-const STICK_R = 56, TAP_MS = 300, TAP_PX = 10, DEAD = 0.15, EXPO = 0.25, YAW_RATE = 1.31;
+// Keyboard, mouse (pointer lock or drag), double-tap, and touch: one hand moves, the other looks.
+// The left half is a move stick where the thumb lands (forward/back, sideways); the right half drags the view.
+// DEAD/EXPO: per-axis dead zone and expo curve, after DJI's defaults (expo 0.25)
+const STICK_R = 56, TAP_MS = 300, TAP_PX = 10, DEAD = 0.15, EXPO = 0.25;
 const shape = v => { // dead zone, then expo: fine control near the centre, full speed at the edge
   const a = Math.max(0, (Math.abs(v) - DEAD) / (1 - DEAD));
   return Math.sign(v) * ((1 - EXPO) * a + EXPO * a ** 3);
 };
 
-export function setupInput(canvas, stickEls, onTeleport) {
+export function setupInput(canvas, stickEl, onTeleport) {
   const s = { yaw: 0, pitch: 0, move: { x: 0, y: 0 }, up: 0 };
   const keys = new Set();
   const ptrs = new Map(); // pointerId -> { x, y, x0, y0, t0, stick }
   let lastTap = null, lockedAt = 0, lastType = '';
-  const sticks = stickEls.map(el => ({ el, x: 0, y: 0 })); // [left, right]
+  const stick = { el: stickEl, x: 0, y: 0 };
 
   const look = (dx, dy, k) => {
     s.yaw -= dx * k;
@@ -22,20 +22,19 @@ export function setupInput(canvas, stickEls, onTeleport) {
     el.style.transform = `translate(${x}px, ${y}px)`;
     el.firstElementChild.style.transform = `translate(${kx}px, ${ky}px)`;
   };
-  const hideStick = st => { // the thumb is off: back to the centre, so the throttle holds the height
-    st.x = st.y = 0;
-    st.el.classList.remove('on');
-    st.el.style.transform = st.el.firstElementChild.style.transform = '';
+  const hideStick = () => { // the thumb is off: back to the centre, so you stop there
+    stick.x = stick.y = 0;
+    stick.el.classList.remove('on');
+    stick.el.style.transform = stick.el.firstElementChild.style.transform = '';
   };
 
   canvas.addEventListener('pointerdown', e => {
     try { canvas.setPointerCapture(e.pointerId); } catch {} // throws while pointer-locked
     lastType = e.pointerType;
-    // lower half: the stick on that side, where the thumb lands; a second finger on a held stick looks instead
-    const side = e.pointerType !== 'mouse' && e.clientY > innerHeight / 2 && sticks[+(e.clientX >= innerWidth / 2)];
-    const stick = side && ![...ptrs.values()].some(p => p.stick === side) ? side : null;
-    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now(), stick });
-    if (stick) {
+    // left half: the move stick, where the thumb lands; the right half, or a second finger on the left, looks
+    const on = e.pointerType !== 'mouse' && e.clientX < innerWidth / 2 && ![...ptrs.values()].some(p => p.stick);
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now(), stick: on });
+    if (on) {
       stick.el.classList.add('on');
       showStick(stick, e.clientX, e.clientY);
     }
@@ -49,9 +48,9 @@ export function setupInput(canvas, stickEls, onTeleport) {
       let dx = e.clientX - p.x0, dy = e.clientY - p.y0;
       const len = Math.hypot(dx, dy);
       if (len > STICK_R) { dx *= STICK_R / len; dy *= STICK_R / len; }
-      p.stick.x = dx / STICK_R;
-      p.stick.y = -dy / STICK_R;
-      showStick(p.stick, p.x0, p.y0, dx, dy);
+      stick.x = dx / STICK_R;
+      stick.y = -dy / STICK_R;
+      showStick(stick, p.x0, p.y0, dx, dy);
     } else {
       look(e.clientX - p.x, e.clientY - p.y, e.pointerType === 'mouse' ? 0.004 : 0.006);
     }
@@ -63,7 +62,7 @@ export function setupInput(canvas, stickEls, onTeleport) {
     const p = ptrs.get(e.pointerId);
     if (!p) return;
     ptrs.delete(e.pointerId);
-    if (p.stick) hideStick(p.stick);
+    if (p.stick) hideStick();
     const tap = e.type === 'pointerup' && performance.now() - p.t0 < TAP_MS &&
       Math.hypot(e.clientX - p.x0, e.clientY - p.y0) < TAP_PX;
     if (!tap) return;
@@ -102,23 +101,21 @@ export function setupInput(canvas, stickEls, onTeleport) {
     keys.clear();
     ptrs.clear();
     lastTap = null;
-    sticks.forEach(hideStick);
+    hideStick();
   };
   addEventListener('blur', reset);
   document.addEventListener('visibilitychange', () => document.hidden && reset());
 
-  // call once per frame: merges sticks/keys into s.move and s.up, and turns by the left stick
-  s.poll = dt => {
+  // call once per frame: merges the stick and keys into s.move and s.up
+  s.poll = () => {
     const k = c => (keys.has(c) ? 1 : 0);
-    const [left, right] = sticks;
     let x = k('KeyD') + k('ArrowRight') - k('KeyA') - k('ArrowLeft');
     let y = k('KeyW') + k('ArrowUp') - k('KeyS') - k('ArrowDown');
     const len = Math.hypot(x, y);
     if (len > 1) { x /= len; y /= len; }
-    s.move.x = len ? x : shape(right.x);
-    s.move.y = len ? y : shape(right.y);
-    s.up = k('Space') + k('KeyE') - k('ShiftLeft') - k('ShiftRight') - k('KeyQ') || shape(left.y);
-    s.yaw -= shape(left.x) * YAW_RATE * dt;
+    s.move.x = len ? x : shape(stick.x);
+    s.move.y = len ? y : shape(stick.y);
+    s.up = k('Space') + k('KeyE') - k('ShiftLeft') - k('ShiftRight') - k('KeyQ');
   };
   return s;
 }

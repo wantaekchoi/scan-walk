@@ -19,14 +19,15 @@ export class Player {
   bvh = null; // MeshBVH of the world-space collider
   bounds = new Box3(); // of the collider
 
-  // move: {x: right, y: forward} with length <= 1, up: -1..1, yaw: camera.
-  // Moves stay level whatever the view pitch, flying too: a drone tilts its camera, not its course.
-  // ponytail: no inertia, stops the moment the stick is let go; ease the speed if a drone-like glide is wanted
-  update(dt, move, up, yaw) {
+  // move: {x: right, y: forward} with length <= 1, up: -1..1, yaw/pitch: camera.
+  // Flying forward goes where the camera looks, pitch included; sideways and walking stay level.
+  // ponytail: no inertia, stops the moment the stick is let go; ease the speed if a glide is wanted
+  update(dt, move, up, yaw, pitch = 0) {
     // standing still on the floor: skip the shapecast, it costs ~1-2k triangle tests next to a dense scanned wall
     if (!this.fly && this.grounded && !move.x && !move.y) return;
     const s = Math.sin(yaw), c = Math.cos(yaw);
-    dir.set(move.x * c - move.y * s, 0, -move.x * s - move.y * c);
+    const p = this.fly ? pitch : 0, ch = Math.cos(p);
+    dir.set(move.x * c - move.y * ch * s, move.y * Math.sin(p), -move.x * s - move.y * ch * c);
     // substeps well under the radius so thin walls and floors can't be skipped, falling included
     const n = Math.ceil((Math.max(WALK, Math.abs(this.vy) - GRAVITY * dt) * dt) / (R / 2));
     const h = dt / n;
