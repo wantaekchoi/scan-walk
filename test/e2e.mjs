@@ -478,7 +478,7 @@ async function objectView(page, tag, file = 'object.usdz') {
   check('touch: room scan starts at eye height over the floor', near(s.start[1], 1.6, 0.01) && `${s.pos}` === `${s.start}`, s);
   const cdp = await page.context().newCDPSession(page);
   const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y, id]) => ({ x, y, id })) });
-  // one hand moves, the other looks: the left half is a move stick where the thumb lands, the right half drags the view
+  // one hand moves, the other looks: a stick where each thumb lands, left half moves, right half turns (90°/s at full tilt)
   const L = [80, 700], R = [300, 700];
   async function push([x, y], dx, dy, ms) {
     await touch('touchStart', [[x, y, 1]]);
@@ -487,10 +487,9 @@ async function objectView(page, tag, file = 'object.usdz') {
     await touch('touchEnd', []);
     await page.waitForTimeout(100);
   }
-  async function drag([x, y], id) { // right half: 50px left, 30px down
+  async function down([x, y], dx, dy, id) { // a thumb pushed and held; touchEnd lets go of all
     await touch('touchStart', [[x, y, id]]);
-    for (let i = 1; i <= 10; i++) { await touch('touchMove', [[x - i * 5, y + i * 3, id]]); await page.waitForTimeout(20); }
-    await touch('touchEnd', []);
+    await touch('touchMove', [[x + dx, y + dy, id]]);
   }
   const moved = (a, b) => +Math.hypot(b.pos[0] - a.pos[0], b.pos[2] - a.pos[2]).toFixed(3);
 
@@ -524,29 +523,61 @@ async function objectView(page, tag, file = 'object.usdz') {
   await touch('touchEnd', []);
   check('touch: half stick gives about a third of full speed (expo)', half > 0.25 && half < 0.4, { half });
 
+  // right stick held: the view keeps turning at a steady rate, stops on letting go, never moves you
   await place(page, 0, 1.9, 0.75);
-  s0 = await state(page);
-  await drag(R, 3);
+  await down(R, 60, 0, 3);
+  await page.waitForTimeout(250);
+  const y1 = (await state(page)).yaw;
+  await page.waitForTimeout(500);
+  const y2 = (await state(page)).yaw;
+  await touch('touchEnd', []);
+  await page.waitForTimeout(100);
+  const y3 = (await state(page)).yaw;
+  await page.waitForTimeout(400);
   s = await state(page);
-  check('touch: right half drag turns and tilts the view without moving', near(s.yaw - s0.yaw, 0.3, 0.05) && near(s.pitch - s0.pitch, -0.18, 0.05) && `${s.pos}` === `${s0.pos}`, { s0, s });
+  const rate = +((y1 - y2) / 0.5).toFixed(2);
+  check('touch: right stick held right keeps turning right, ~90°/s, and stops when let go', near(rate, Math.PI / 2, 0.25) && s.yaw === y3 && `${s.pos}` === '0,1.9,0.75', { rate, y1, y2, y3, after: s.yaw, pos: s.pos });
   await place(page, 0, 1.9, 0.75);
-  s0 = await state(page);
-  await drag([300, 200], 3);
+  await push(R, 0, -60, 500);
   s = await state(page);
-  check('touch: right half drag looks from high up the screen too', near(s.yaw - s0.yaw, 0.3, 0.05) && `${s.pos}` === `${s0.pos}`, { s0, s });
+  check('touch: right stick up looks up', s.pitch > 0.5 && s.pitch < 1, s.pitch);
+  await push(R, 0, -60, 2500);
+  const up = (await state(page)).pitch;
+  await push(R, 0, 60, 4500);
+  const downP = (await state(page)).pitch;
+  check('touch: pitch stops at ±1.5 rad', up === 1.5 && downP === -1.5, { up, down: downP });
+  await place(page, 0, 1.9, 0.75);
+  await push([300, 200], 60, 0, 500);
+  s = await state(page);
+  check('touch: the right stick works from high up the screen too', s.yaw < -0.5, s.yaw);
 
   await click(page, '#reset');
+  s0 = await state(page);
+  await touch('touchStart', [[...L, 1]]);  await click(page, '#reset');
   s0 = await state(page);
   await touch('touchStart', [[...L, 1]]);
   await touch('touchMove', [[L[0], L[1] - 60, 1]]);
   await touch('touchStart', [[L[0], L[1] - 60, 1], [...R, 2]]);
-  for (let i = 1; i <= 10; i++) { await touch('touchMove', [[L[0], L[1] - 60, 1], [R[0] - i * 5, R[1], 2]]); await page.waitForTimeout(30); }
-  await page.waitForTimeout(700);
-  await shot(page, 'm2-stick-and-look');
+  await touch('touchMove', [[L[0], L[1] - 60, 1], [R[0] - 60, R[1], 2]]);
+  await page.waitForTimeout(800);
+  await shot(page, 'm2-both-sticks');
+  const sticksOn = await page.evaluate(() => document.querySelectorAll('.stick.on').length);
   await touch('touchEnd', [[L[0], L[1] - 60, 1]]);
   await touch('touchEnd', []);
   s = await state(page);
-  check('touch: left stick flies while the right thumb turns the view', moved(s0, s) > 0.5 && near(s.yaw - s0.yaw, 0.3, 0.05), { s0: s0.pos, pos: s.pos, yaw: s.yaw });
+  check('touch: both thumbs at once: flies and keeps turning left', moved(s0, s) > 0.5 && s.yaw - s0.yaw > 0.8 && sticksOn === 2, { s0: s0.pos, pos: s.pos, yaw: s.yaw, sticksOn });
+
+  // a second finger on a half that already has its stick does nothing
+  await click(page, '#reset');
+  s0 = await state(page);
+  await touch('touchStart', [[...L, 1]]);
+  await touch('touchMove', [[L[0], L[1] - 60, 1]]);
+  await touch('touchStart', [[L[0], L[1] - 60, 1], [150, 400, 2]]);
+  for (let i = 1; i <= 10; i++) { await touch('touchMove', [[L[0], L[1] - 60, 1], [150 + i * 5, 400 - i * 5, 2]]); await page.waitForTimeout(30); }
+  await touch('touchEnd', [[L[0], L[1] - 60, 1]]);
+  await touch('touchEnd', []);
+  s = await state(page);
+  check('touch: a second finger on the move half is ignored', s.yaw === s0.yaw && s.pitch === s0.pitch && moved(s0, s) > 0.3, { s0, s });
 
   // thumbs still down when the app loses focus: movement must stop
   await click(page, '#reset');
@@ -556,12 +587,12 @@ async function objectView(page, tag, file = 'object.usdz') {
   await touch('touchMove', [[L[0], L[1] - 60, 5], [R[0], R[1] - 60, 6]]);
   await page.waitForTimeout(300);
   await page.evaluate(() => window.dispatchEvent(new Event('blur')));
-  const a = (await state(page)).pos;
+  const a = await state(page);
   await page.waitForTimeout(500);
-  const b = (await state(page)).pos;
+  const b = await state(page);
   const stickOn = await page.evaluate(() => !!document.querySelector('.stick.on'));
   await touch('touchEnd', []);
-  check('touch: blur releases the stick', a[2] < 0.6 && `${a}` === `${b}` && !stickOn, { a, b, stickOn });
+  check('touch: blur releases both sticks', a.pos[2] < 0.6 && `${a.pos}` === `${b.pos}` && a.pitch > 0.2 && a.pitch === b.pitch && !stickOn, { a: [a.pos, a.pitch], b: [b.pos, b.pitch], stickOn });
 
   // no teleport: double-tapping the floor, on the look side or the move side, leaves you where you are
   await click(page, '#reset');
@@ -585,12 +616,12 @@ async function objectView(page, tag, file = 'object.usdz') {
   await page.waitForTimeout(250);
   const h1 = await hud(page);
   await push(L, 0, -60, 500);
-  await drag(R, 3);
+  await push(R, 60, 0, 300);
   await page.waitForTimeout(250);
   const h2 = await hud(page);
   await shot(page, 'm4-coords');
   check('touch: 좌표 shows x y z and pitch yaw roll of the camera', h1.shown && h1.pressed === 'true' && hudMatches(h1), h1);
-  check('touch: the readout follows the stick and the view drag', h2.shown && hudMatches(h2) && Math.hypot(h2.n[0] - h1.n[0], h2.n[2] - h1.n[2]) > 0.5 && Math.abs(h2.n[4] - h1.n[4]) > 10, { h1: h1.n, h2: h2.n });
+  check('touch: the readout follows both sticks', h2.shown && hudMatches(h2) && Math.hypot(h2.n[0] - h1.n[0], h2.n[2] - h1.n[2]) > 0.5 && Math.abs(h2.n[4] - h1.n[4]) > 10, { h1: h1.n, h2: h2.n });
   const row = await page.evaluate(() => [...document.querySelectorAll('#bar button')].filter(b => !b.hidden).map(b => { const r = b.getBoundingClientRect(); return [b.textContent, Math.round(r.top), Math.round(r.left), Math.round(r.right), +r.height.toFixed(1)]; }));
   check('touch: 390px bar keeps every button on one row, 좌표 and 잊기 included, ~39px tall', row.length === 7 && row.every(b => b[1] === row[0][1] && b[2] >= 0 && b[3] <= 390 && b[4] >= 39), row);
   await page.reload();
@@ -635,11 +666,15 @@ async function objectView(page, tag, file = 'object.usdz') {
   let s = await state(page);
   check('touch landscape: left stick flies forward', s.pos[2] - s0.pos[2] < -0.5, { s0: s0.pos, pos: s.pos });
   s0 = s;
-  await touch('touchStart', [[700, 200, 2]]);
-  for (let i = 1; i <= 10; i++) { await touch('touchMove', [[700 - i * 5, 200 + i * 3, 2]]); await page.waitForTimeout(20); }
+  await touch('touchStart', [[700, 300, 2]]);
+  await touch('touchMove', [[640, 300, 2]]);
+  await page.waitForTimeout(250);
+  const ly1 = (await state(page)).yaw;
+  await page.waitForTimeout(500);
+  const ly2 = (await state(page)).yaw;
   await touch('touchEnd', []);
   s = await state(page);
-  check('touch landscape: right half drag turns and tilts the view', near(s.yaw - s0.yaw, 0.3, 0.05) && near(s.pitch - s0.pitch, -0.18, 0.05) && `${s.pos}` === `${s0.pos}` && errors.length === 0, { s0, s, errors });
+  check('touch landscape: right stick held left keeps turning left, without moving', ly2 - ly1 > 0.5 && `${s.pos}` === `${s0.pos}` && errors.length === 0, { ly1, ly2, s0: s0.pos, pos: s.pos, errors });
   await page.context().close();
 }
 

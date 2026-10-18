@@ -25,7 +25,7 @@ camera.rotation.order = 'YXZ';
 const fix = new THREE.Group(); // manual axis/scale correction on top of the file's upAxis/metersPerUnit
 scene.add(fix);
 
-const input = setupInput(canvas, $('stick'));
+const input = setupInput(canvas, [$('stick'), $('look')]);
 const start = new THREE.Vector3(); // where the eye (the camera) starts
 const bounds = new THREE.Box3();
 let model = null, lit = false, axis = 0, scale = 0, saved = null;
@@ -383,7 +383,7 @@ renderer.setAnimationLoop(t => {
   timer.update(t);
   const dt = Math.min(timer.getDelta(), 0.1);
   if (model) {
-    input.poll();
+    input.poll(dt);
     fly(dt, input.move, input.up, input.yaw, input.pitch);
   }
   camera.rotation.set(input.pitch, input.yaw, 0);
