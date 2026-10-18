@@ -175,12 +175,10 @@ async function objectView(page, tag) {
   check('fly: forward stays level looking up or down', [pitched.up, pitched.down].every(m => near(m.dy, 0, 1e-6) && near(m.dz, -3, 0.01)), pitched);
   check('walk: forward ignores the view pitch', near(pitched.walk.dy, 0, 0.02) && pitched.walk.dz < -0.5, pitched.walk);
 
-  // fixed-dt flying down: a real scan's floors have no underside, so feet that slipped a little under one,
-  // or flew low into a step, must still land on it; and the top of the ceiling must not trap you above the room
+  // fixed-dt: it's a viewer, flying passes through everything: level into the step, down through the ceiling and the floor
   const descents = await page.evaluate(() => {
     const p = window.app.player, r = v => +v.toFixed(3), out = {};
-    for (const [name, x, y, z, yaw, fwd, up, n] of [['under', 0, -0.02, 0.75, 0, 0, -1, 60], ['step', -0.5, 0, -1.5, Math.PI / 2, 1, -1, 30],
-      ['stepLevel', -0.5, 0, -1.5, Math.PI / 2, 1, 0, 30], ['ceiling', 0, 2.9, 0.75, 0, 0, -1, 120]]) {
+    for (const [name, x, y, z, yaw, fwd, up, n] of [['stepLevel', -0.5, 0, -1.5, Math.PI / 2, 1, 0, 30], ['ceiling', 0, 2.9, 0.75, 0, 0, -1, 120]]) {
       p.fly = true; p.pos.set(x, y, z); p.vy = 0;
       for (let i = 0; i < n; i++) p.update(1 / 60, { x: 0, y: fwd }, up, yaw);
       out[name] = p.pos.toArray().map(r);
@@ -188,9 +186,8 @@ async function objectView(page, tag) {
     p.fly = false; p.pos.set(0, 0, 0.75); p.grounded = false;
     return out;
   });
-  check('fly down: feet 2cm under the floor land on it', near(descents.under[1], 0, 0.02), descents.under);
-  check('fly low into the 0.18m step, descending or level: ends on top of it', near(descents.step[1], 0.18, 0.02) && near(descents.stepLevel[1], 0.18, 0.02) && descents.step[0] < -1.6, descents);
-  check('fly down from above the ceiling: passes its top, lands on the floor', near(descents.ceiling[1], 0, 0.02), descents.ceiling);
+  check('fly level into the 0.18m step: passes through it, not up onto it', near(descents.stepLevel[1], 0, 0.01) && near(descents.stepLevel[0], -2, 0.01), descents.stepLevel);
+  check('fly down from above the ceiling: passes the ceiling and the floor, still descending', near(descents.ceiling[1], -1.1, 0.01), descents.ceiling);
 
   await place(page, 0, 0, 3.3);
   await page.waitForTimeout(300);
@@ -302,31 +299,22 @@ async function objectView(page, tag) {
   s = await state(page);
   await page.evaluate(() => document.exitPointerLock?.());
   check('floor only: double-click teleports onto it', near(s.pos[1], 0, 0.02) && s.pos[2] < before[2] - 0.3, { before, after: s.pos });
-  const flatDown = await page.evaluate(() => {
-    const p = window.app.player;
-    p.pos.set(0, 1, 0.75);
-    for (let i = 0; i < 60; i++) p.update(1 / 60, { x: 0, y: 0 }, -1, 0);
-    return +p.pos.y.toFixed(3);
-  });
-  check('floor only: flying down still lands on it (no headroom anywhere)', near(flatDown, 0, 0.02), flatDown);
 
   // 3D Scanner App export: room turned off the axes, a hole under the bounding box centre, texture on emissiveColor
   await load(page, 'room_scanner.usdz');
   s = await state(page);
   const off = +Math.hypot(s.start[0] - s.centre[0], s.start[2] - s.centre[2]).toFixed(3);
   check('scanner export: no floor under the centre, starts flying over the nearest floor', s.fly && (await page.textContent('#mode')) === '비행' && near(s.start[1], 0, 0.02) && off < 1, { ...s, off });
-  // real scans have holes in the floor: flying down over one, from the room or from above its ceiling, stops at the scan's bottom
+  // real scans have holes in the floor: flying down over one keeps going below the scan's bottom
   const holeDown = await page.evaluate(() => {
     const { player: p, bounds: b, start } = window.app, c = b.getCenter(b.min.clone());
-    const ys = [0.5, 2.9].map(y => {
-      p.pos.set(c.x, y, c.z);
-      for (let i = 0; i < 150; i++) p.update(1 / 60, { x: 0, y: 0 }, -1, 0);
-      return +p.pos.y.toFixed(3);
-    });
+    p.pos.set(c.x, 0.5, c.z);
+    for (let i = 0; i < 150; i++) p.update(1 / 60, { x: 0, y: 0 }, -1, 0);
+    const out = { y: +p.pos.y.toFixed(3), bottom: +b.min.y.toFixed(3) };
     p.pos.copy(start);
-    return ys;
+    return out;
   });
-  check('scanner export: flying down over the hole, from inside or above the ceiling, stops at the bottom of the scan', holeDown.every(y => near(y, 0, 0.02)), holeDown);
+  check('scanner export: flying down over the hole passes below the bottom of the scan', near(holeDown.y, -4.5, 0.01) && holeDown.y < holeDown.bottom - 4, holeDown);
   const unlit = await brightness(page);
   await shot(page, 'd6b-scanner-unlit');
   await click(page, '#light');
@@ -485,7 +473,7 @@ async function objectView(page, tag) {
   await place(page, 0, 0.5, 0.75);
   await push(L, 0, 60, 1000);
   s = await state(page);
-  check('touch: left stick down descends and stops on the floor, still flying', s.fly && near(s.pos[1], 0, 0.02), s.pos);
+  check('touch: left stick down descends through the floor, still flying', s.fly && s.pos[1] < -0.5, s.pos);
 
   await place(page, 0, 0.3, 0.75);
   s0 = await state(page);

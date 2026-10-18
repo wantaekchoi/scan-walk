@@ -30,16 +30,9 @@ export class Player {
     const h = dt / n;
     for (let i = 0; i < n; i++) {
       if (this.fly) {
+        // it's a viewer, not a game: flying passes through walls, ceilings and floors alike; constraints live only in walking
         this.pos.addScaledVector(dir, FLY * h);
-        const y = this.pos.y + up * CLIMB * h;
-        // flying passes through walls but not down through floors, like a drone landing. The ray starts STEP up,
-        // as walking's: a scanned floor has no underside, so feet a little under one (noise, a sill) still land on it
-        ray.origin.set(this.pos.x, this.pos.y + STEP, this.pos.z);
-        ray.direction.set(0, -1, 0);
-        const hit = this.bvh && this.floorAlong(ray);
-        // over a hole in the floor (real scans have them), a scan with a floor keeps the feet from sinking below its bottom
-        const floor = hit ? hit.point.y : this.lastFloor ? Math.min(this.pos.y, this.bounds.min.y) : -Infinity;
-        this.pos.y = Math.max(y, floor);
+        this.pos.y += up * CLIMB * h;
         this.vy = 0;
         this.grounded = false;
         continue;
