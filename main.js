@@ -167,14 +167,16 @@ async function rebuildBusy() {
 }
 
 // first floor along the ray: a face turned up, with the eye still under the top of the scan
+// (else the first one turned up: a scan lower than the eye, a terrace or a floor only, has no headroom anywhere)
 function floorAlong(ray) {
-  for (let near = 0; ;) {
+  for (let near = 0, low = null; ;) {
     const hit = player.bvh.raycastFirst(ray, THREE.DoubleSide, near);
-    if (!hit) return null;
+    if (!hit) return low;
     const n = hit.face.normal;
     if (n.dot(ray.direction) > 0) n.negate();
     if (n.y < 0.5) return null; // floors only
     if (hit.point.y + EYE <= bounds.max.y) return hit;
+    low ??= hit;
     near = hit.distance + 0.01; // no headroom (top of the ceiling after an accidental ▲, top of an object): look past it
   }
 }

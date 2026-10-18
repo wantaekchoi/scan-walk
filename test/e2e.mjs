@@ -272,6 +272,19 @@ async function objectView(page, tag) {
   s = await state(page);
   check('nowhere to stand (walls and ceiling only): starts flying with the eye at the centre', s.fly && (await page.textContent('#mode')) === '비행' && near(s.pos[1] + 1.6, s.centre[1], 0.01), s);
 
+  // floor only: no room for the eye under the top of the scan anywhere, still the floor to stand on
+  await load(page, 'room_flat.usdz');
+  s = await state(page);
+  check('floor only, lower than eye height: starts walking on it', !s.fly && near(s.start[1], 0, 0.02), s);
+  await place(page, 0, 0, 0.75, 0, -0.5);
+  await page.waitForTimeout(200);
+  before = (await state(page)).pos;
+  await page.mouse.dblclick(500, 620);
+  await page.waitForTimeout(300);
+  s = await state(page);
+  await page.evaluate(() => document.exitPointerLock?.());
+  check('floor only: double-click teleports onto it', near(s.pos[1], 0, 0.02) && s.pos[2] < before[2] - 0.3, { before, after: s.pos });
+
   // 3D Scanner App export: room turned off the axes, a hole under the bounding box centre, texture on emissiveColor
   await load(page, 'room_scanner.usdz');
   s = await state(page);

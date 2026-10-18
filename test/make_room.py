@@ -4,7 +4,8 @@ Room 6m (x) x 5m (z), walls 2.6m, door gap (0.9m x 2.1m) in the +z wall,
 box obstacle 1m cube at (1.8, 0, -1.2), step 0.18m platform at x in [-3,-1.5], z in [-2.5,-0.5].
 Outputs: room_y.usdz (upAxis Y), room_z.usdz (Z-up geometry, upAxis Z),
 room_z_mislabeled.usdz (Z-up geometry, upAxis Y declared), room_cm.usdz (centimetres, metersPerUnit 0.01),
-room_nofloor.usdz (walls and ceiling only: nowhere to stand), room_8k.usdz (8192px texture),
+room_nofloor.usdz (walls and ceiling only: nowhere to stand), room_flat.usdz (floor only: a terrace,
+lower than eye height), room_8k.usdz (8192px texture),
 room_scanner.usdz (as 3D Scanner App exports: black diffuseColor with the texture on emissiveColor,
 turned 30 deg about up, a 1.2m hole in the floor under the bounding box centre),
 object.usdz (closed 0.6m cube, centre (0.5, 0.3, -0.2): an object scan, not a room).
@@ -117,6 +118,7 @@ write('room_z', UsdGeom.Tokens.z, 1.0, zup)
 write('room_z_mislabeled', UsdGeom.Tokens.y, 1.0, zup)
 write('room_cm', UsdGeom.Tokens.y, 0.01, lambda p: tuple(c * 100 for c in p))
 write('room_nofloor', UsdGeom.Tokens.y, 1.0, lambda p: p, faces=slice(1, 8))
+write('room_flat', UsdGeom.Tokens.y, 1.0, lambda p: p, faces=slice(0, 1))
 write('room_8k', UsdGeom.Tokens.y, 1.0, lambda p: p, tex='texture8k.png')
 
 # scanner export: the full floor swapped for four pieces around a hole under the turned room's bounding box centre
