@@ -3,16 +3,14 @@ import { USDLoader } from 'three/addons/loaders/USDLoader.js';
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
 import { setupInput } from './input.js';
 
-const EYE = 1.6, FLY = 3, CLIMB = 2; // eye height over the floor (m), forward and up/down speed (m/s)
-// point size in metres: a LiDAR scan's points are 1-3cm apart, so 2cm closes the surface where they are dense
-// without fattening it into blobs; sparse patches stay a little see-through
-const POINT = 0.02;
+const EYE = 1.6, FLY = 3, CLIMB = 2; // m over the floor, m/s, m/s
+const POINT = 0.02; // m, drawn point diameter
 
 const $ = id => document.getElementById(id);
 const canvas = $('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: devicePixelRatio < 2 });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-// three shrinks bigger textures through a 2D canvas; iOS caps canvases at 4096² px, and an 8k map is ~350MB of GPU memory
+// three resizes bigger textures through a 2D canvas, which iOS caps at 4096² px
 renderer.capabilities.maxTextureSize = Math.min(renderer.capabilities.maxTextureSize, 4096);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x111111);
@@ -26,7 +24,7 @@ const fix = new THREE.Group(); // manual axis/scale correction on top of the fil
 scene.add(fix);
 
 const input = setupInput(canvas, [$('stick'), $('look')]);
-const start = new THREE.Vector3(); // where the eye (the camera) starts
+const start = new THREE.Vector3(); // camera (eye) position
 const bounds = new THREE.Box3();
 let model = null, lit = false, axis = 0, scale = 0, saved = null;
 
@@ -39,7 +37,7 @@ function busy(text) {
   $('busy-text').textContent = text || '';
 }
 const nextPaint = () => new Promise(r => requestAnimationFrame(() => setTimeout(r)));
-function say(text) { // short notice that doesn't cover the scan
+function say(text) {
   $('toast').textContent = text;
   $('toast').hidden = false;
   clearTimeout(say.t);
@@ -56,7 +54,7 @@ function readFile(file) {
   });
 }
 
-// file: File from the picker/drop (remembered on success) or the Blob already in IndexedDB (save = false)
+// file: File from picker/drop, or the Blob from IndexedDB (save = false)
 async function open(file, save = true) {
   try {
     const buf = await readFile(file);
@@ -74,7 +72,7 @@ async function open(file, save = true) {
     $('intro').hidden = true;
     busy(null);
     if (save) {
-      mark(false); // picked another file instead of answering the "멈췄어요" prompt
+      mark(false);
       idb('readwrite', st => st.put(file, 'last')).then(() => { saved = file; $('forget').hidden = false; }, () => {});
     }
     return true;
@@ -82,7 +80,7 @@ async function open(file, save = true) {
     console.warn(e);
     busy(null);
     const text = `열 수 없습니다: ${e.message || e}`;
-    if (model) say(text); // keep showing the scan that is already open
+    if (model) say(text);
     else {
       $('msg').textContent = text;
       $('intro').hidden = false;
@@ -91,21 +89,19 @@ async function open(file, save = true) {
   }
 }
 
-// colours as PLYLoader keeps them: sRGB bytes turned linear (setRGB with SRGBColorSpace), back in a byte,
-// so the same scan opened as .xyz or .ply looks the same
+// sRGB byte -> linear byte, the same conversion PLYLoader applies
 const LINEAR = new Uint8Array(256).map((_, v) => Math.round(new THREE.Color().setRGB(v / 255, 0, 0, THREE.SRGBColorSpace).r * 255));
 
-// 3D Scanner App "XYZ color": x,y,z,r,g,b per line, commas, colours 0-255, no header. Spaces work too, and 3 columns
-// (no colours). One pass over the bytes, no string or array per line: 700k lines / 25MB stays quick on a phone
+// x,y,z[,r,g,b] per line, comma or space separated, colours 0-255
 function parseXYZ(buf) {
   const b = new Uint8Array(buf), len = b.length;
-  let lines = 1; // \n, \r\n or a lone \r: count both, CRLF just leaves room to spare
+  let lines = 1; // a lone \r ends a line too
   for (let i = 0; i < len; i++) if (b[i] === 10 || b[i] === 13) lines++;
   const pos = new Float32Array(lines * 3), col = new Uint8Array(lines * 3), row = new Float64Array(6);
   let n = 0, k = 0, colours = true;
   for (let i = 0; i <= len;) {
     const c = i < len ? b[i] : 10;
-    if (c === 10 || c === 13) { // end of a line
+    if (c === 10 || c === 13) {
       if (k >= 3) {
         pos[n * 3] = row[0]; pos[n * 3 + 1] = row[1]; pos[n * 3 + 2] = row[2];
         if (k >= 6) for (let j = 0; j < 3; j++) col[n * 3 + j] = LINEAR[Math.min(255, Math.max(0, Math.round(row[3 + j])))];
@@ -114,7 +110,7 @@ function parseXYZ(buf) {
       }
       k = 0;
       i++;
-    } else if ((c >= 48 && c <= 57) || c === 45 || c === 43 || c === 46) { // a number: [-+]digits[.digits][e[-+]digits]
+    } else if ((c >= 48 && c <= 57) || c === 45 || c === 43 || c === 46) {
       const neg = c === 45;
       if (c === 45 || c === 43) i++;
       let m = 0, e = 0, dot = false;
@@ -135,7 +131,7 @@ function parseXYZ(buf) {
       if (k >= 0 && k < 6) row[k] = neg ? -v : v;
       if (k >= 0) k++;
     } else {
-      if (c !== 44 && c !== 32 && c !== 9) k = -1; // a word: not a line of numbers
+      if (c !== 44 && c !== 32 && c !== 9) k = -1; // text: skip the line
       i++;
     }
   }
@@ -146,7 +142,6 @@ function parseXYZ(buf) {
   return g;
 }
 
-// PLY (3D Scanner App, PCL): its vertices as points, faces or not; normals and curvature go unused
 function ply(buf) {
   const g = new PLYLoader().parse(buf);
   g.deleteAttribute('normal');
@@ -157,14 +152,13 @@ function ply(buf) {
 function points(g) {
   finite(g);
   const group = new THREE.Group();
-  // with sizeAttenuation three draws a point size * tan(fov / 2) across, not size: divide that back out
+  // sizeAttenuation draws size * tan(fov / 2) world units across
   const size = POINT / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   group.add(new THREE.Points(g, new THREE.PointsMaterial({ size, vertexColors: !!g.attributes.color })));
   return group;
 }
 
-// drop NaN / infinite points (PLY exports have them, 1e999 in an XYZ): one makes three's bounding sphere NaN
-// and the whole cloud is culled, a blank screen
+// a NaN point makes the bounding sphere NaN
 function finite(g) {
   const p = g.attributes.position.array, keep = [];
   for (let i = 0; i < p.length; i += 3) if (Number.isFinite(p[i] + p[i + 1] + p[i + 2])) keep.push(i / 3);
@@ -175,7 +169,7 @@ function finite(g) {
     keep.forEach((v, j) => out.set(a.array.subarray(v * a.itemSize, (v + 1) * a.itemSize), j * a.itemSize));
     g.setAttribute(name, new THREE.BufferAttribute(out, a.itemSize, a.normalized));
   }
-  g.boundingSphere = g.boundingBox = null; // PLYLoader already computed them, NaN
+  g.boundingSphere = g.boundingBox = null; // PLYLoader computed them with the NaNs
 }
 
 function setModel(group) {
@@ -196,8 +190,8 @@ function setModel(group) {
     const many = Array.isArray(o.material);
     const litMats = [o.material].flat();
     const flatMats = litMats.map(m => {
-      m.side = THREE.DoubleSide; // scans are single-sided and full of holes
-      if (!m.map && m.emissiveMap) { // 3D Scanner App: black diffuseColor and the photo on emissiveColor, which the lights would not shade
+      m.side = THREE.DoubleSide;
+      if (!m.map && m.emissiveMap) { // 3D Scanner App puts the texture on emissiveColor
         m.map = m.emissiveMap;
         m.emissiveMap = null;
         m.color.set(0xffffff);
@@ -212,14 +206,13 @@ function setModel(group) {
     o.userData.mats = [many ? flatMats : flatMats[0], many ? litMats : litMats[0]];
     o.material = o.userData.mats[+lit];
   });
-  $('light').hidden = !meshes; // points carry their colours and nothing to light
+  $('light').hidden = !meshes;
   model = group;
   fix.add(model);
   axis = scale = 0;
   rebuild();
 }
 
-// place the scan and find where to start, once per load / axis / scale change
 function rebuild() {
   fix.rotation.set(AXES[axis][1], 0, AXES[axis][2]);
   fix.scale.setScalar(SCALES[scale]);
@@ -229,12 +222,10 @@ function rebuild() {
   model.traverse(o => (o.isMesh || o.isPoints) && heights(o, ys, ws, vy));
   const centre = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
-  // object, not a room: under ~2m (door height, two strides) across both ways, or narrow one way and low (a slide, a car)
   const object = Math.max(size.x, size.z) < 2 || (size.y < 2 && Math.min(size.x, size.z) < 2);
   const floor = object ? null : floorHeight(ys, ws, vy);
-  // object: its centre's height, backed off along +z (yaw 0 looks at it) until its bounding sphere fits the narrower FOV
+  // back off along +z until the bounding sphere fits the narrower FOV
   if (object) centre.z += size.length() / 2 / Math.sin(Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(camera.aspect, 1)));
-  // a room: eye height over its floor, under the middle of the scan (holes don't matter, nothing blocks); no floor: the middle
   start.copy(centre);
   if (floor !== null) start.y = floor + EYE;
   $('axis').textContent = `축 ${AXES[axis][0]}`;
@@ -247,16 +238,13 @@ function resetView() {
   input.yaw = input.pitch = 0;
 }
 
-// world-space heights for finding the floor, and the bounds: each triangle's middle, weighted by its area seen
-// from above, so a wall counts for nothing and a floor counts the same however finely it is meshed.
-// Points count one each: a scan's points are spread about evenly, so a horizontal surface piles up in one layer.
-// vy: every vertex / point height, for how high the scan reaches (walls included)
+// ys/ws: triangle centre heights weighted by area seen from above, or point heights weighted 1; vy: all heights
 function heights(o, ys, ws, vy) {
   const g = o.geometry, p = g.attributes.position, idx = g.index, v = new THREE.Vector3();
   const w = new Float32Array(p.count * 3);
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld).toArray(w, i * 3);
-    if (!Number.isFinite(v.x + v.y + v.z)) continue; // a broken vertex: its triangles' area comes out NaN and is skipped too
+    if (!Number.isFinite(v.x + v.y + v.z)) continue;
     bounds.expandByPoint(v);
     vy.push(v.y);
     if (o.isPoints) { ys.push(v.y); ws.push(1); }
@@ -270,22 +258,18 @@ function heights(o, ys, ws, vy) {
   }
 }
 
-// The floor: in the lower half of the scan, the lowest height layer (15cm) holding at least 30% of the heaviest one there.
-// The ceiling is in the upper half; a bed or table top is smaller than the floor; a sloped ground or several levels
-// start on the lowest big one, not on a mezzanine or under the ground. null when there is none (walls and ceiling only).
-// "The scan" is the middle 98% of its vertex / point heights, not the bounds: a few stray points metres under the room
-// are scanner noise.
-const BIN = 0.05;
+// lowest 15cm layer in the lower half of the 1-99% height range holding >= 30% of that half's heaviest; null if none
+const BIN = 0.05; // m
 function floorHeight(ys, ws, vy) {
   const [lo, hi] = quantiles(vy, null, 0.01, 0.99), nb = Math.floor((hi - lo) / BIN) + 1, h = new Float64Array(nb);
   ys.forEach((y, i) => { if (y >= lo && y <= hi) h[Math.min(nb - 1, Math.floor((y - lo) / BIN))] += ws[i]; });
-  const win = i => (h[i - 1] || 0) + h[i] + (h[i + 1] || 0); // a noisy floor straddling two bins still counts whole
+  const win = i => (h[i - 1] || 0) + h[i] + (h[i + 1] || 0);
   const mid = (lo + hi) / 2, below = Math.floor((mid - lo) / BIN) + 1;
   let max = 0;
   for (let i = 0; i < below; i++) max = Math.max(max, win(i));
   for (let i = 0; i < below; i++) {
     if (!max || win(i) < 0.3 * max) continue;
-    const y0 = lo + (i + 0.5) * BIN; // that layer's weighted mean height
+    const y0 = lo + (i + 0.5) * BIN;
     let s = 0, sw = 0;
     ys.forEach((y, k) => { if (Math.abs(y - y0) <= 1.5 * BIN) { s += y * ws[k]; sw += ws[k]; } });
     return s / sw;
@@ -293,8 +277,7 @@ function floorHeight(ys, ws, vy) {
   return null;
 }
 
-// quantiles of the heights (weighted by ws, or one each) from a 65536-bin histogram, to range / 65535: under a mm
-// for a scan with strays tens of metres off, and no sort of a million samples
+// histogram quantiles, resolution (max - min) / 65535; ws null = weight 1
 function quantiles(ys, ws, ...qs) {
   let lo = Infinity, hi = -Infinity, total = 0;
   ys.forEach((y, i) => { lo = Math.min(lo, y); hi = Math.max(hi, y); total += ws ? ws[i] : 1; });
@@ -307,9 +290,7 @@ function quantiles(ys, ws, ...qs) {
   });
 }
 
-// Free flight, nothing blocks (a viewer, not a game): forward goes where the camera looks, pitch included; sideways stays level.
-// move: {x: right, y: forward} with length <= 1, up: -1..1 (keys).
-// ponytail: no inertia, stops the moment the stick is let go; ease the speed if a glide is wanted
+// move: {x: right, y: forward}, length <= 1; up: -1..1; yaw/pitch: rad
 function fly(dt, move, up, yaw, pitch) {
   const s = Math.sin(yaw), c = Math.cos(yaw), ch = Math.cos(pitch), k = FLY * dt;
   camera.position.x += (move.x * c - move.y * ch * s) * k;
@@ -338,20 +319,19 @@ $('forget').onclick = forget;
 $('again-forget').onclick = () => { forget(); $('msg').textContent = ''; };
 $('reopen').onclick = reopen;
 
-// camera readout (좌표 / C): eye position in m, view angles in degrees; remembered, hidden at first
 const hud = $('hud'), COORDS = 'scan-walk-coords';
 let hudAt = -Infinity;
 function showCoords(on) {
   hud.hidden = !on;
   $('coords').setAttribute('aria-pressed', on);
-  hudAt = -Infinity; // write it on the next frame, not up to 100ms later
+  hudAt = -Infinity;
   try { on ? localStorage.setItem(COORDS, '1') : localStorage.removeItem(COORDS); } catch {}
 }
 try { showCoords(!!localStorage.getItem(COORDS)); } catch { showCoords(false); }
 $('coords').onclick = () => showCoords(hud.hidden);
 addEventListener('keydown', e => { if (e.code === 'KeyC' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) showCoords(hud.hidden); });
 
-// a focused button would also fire on Space (fly up)
+// a focused button would also fire on Space
 document.addEventListener('click', e => e.target.closest?.('button')?.blur());
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => {
@@ -370,15 +350,14 @@ function resize() {
 }
 addEventListener('resize', resize);
 resize();
-// three asks the browser to restore the context; until then nothing can be drawn
 canvas.addEventListener('webglcontextlost', () => {
-  mark(true); // don't auto-reopen the saved scan next time without asking
+  mark(true);
   busy('그래픽 메모리가 모자라 화면을 잃었습니다. 안 돌아오면 페이지를 새로 고쳐 주세요.');
 });
 canvas.addEventListener('webglcontextrestored', () => { mark(false); busy(null); });
 
 const timer = new THREE.Timer();
-timer.connect(document); // no huge step after the tab was hidden
+timer.connect(document); // no huge dt after a hidden tab
 renderer.setAnimationLoop(t => {
   timer.update(t);
   const dt = Math.min(timer.getDelta(), 0.1);
@@ -387,7 +366,7 @@ renderer.setAnimationLoop(t => {
     fly(dt, input.move, input.up, input.yaw, input.pitch);
   }
   camera.rotation.set(input.pitch, input.yaw, 0);
-  if (!hud.hidden && t - hudAt > 100) { // ~10Hz: a DOM write every frame is wasted on numbers nobody reads that fast
+  if (!hud.hidden && t - hudAt > 100) { // ms
     hudAt = t;
     const p = camera.position, r = camera.rotation, deg = THREE.MathUtils.radToDeg;
     const f = (v, d) => (+v.toFixed(d) || 0).toFixed(d); // -0.001 reads 0.00, not -0.00
@@ -397,7 +376,7 @@ renderer.setAnimationLoop(t => {
   renderer.render(scene, camera);
 });
 
-// last opened file (the File itself, not its bytes); the app works the same when IndexedDB is missing or full
+// the last opened File; IndexedDB may be missing or full
 function idb(mode, fn) {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open('scan-walk', 1);
@@ -413,10 +392,9 @@ function idb(mode, fn) {
   });
 }
 
-window.app = { input, open, bounds, start, camera, fly, get model() { return model; } }; // for tests and the console
+window.app = { input, open, bounds, start, camera, fly, get model() { return model; } }; // for tests
 
-// Set while reopening the saved scan, cleared once a few frames are drawn. Still there at start-up means
-// that attempt killed the tab (usually memory), so ask instead of crashing in a loop.
+// set while reopening; still set at start-up = that reopen killed the tab
 const MARK = 'scan-walk-opening';
 function mark(on) { try { on ? localStorage.setItem(MARK, '1') : localStorage.removeItem(MARK); } catch {} }
 function marked() { try { return !!localStorage.getItem(MARK); } catch { return false; } }
@@ -426,7 +404,7 @@ async function reopen() {
   $('msg').textContent = '';
   mark(true);
   const ok = await open(saved, false);
-  for (let i = 0; i < 5; i++) await new Promise(requestAnimationFrame); // the first frames upload the textures
+  for (let i = 0; i < 5; i++) await new Promise(requestAnimationFrame); // texture upload happens in the first frames
   mark(false);
   if (!ok) forget();
 }

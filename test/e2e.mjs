@@ -1,4 +1,4 @@
-// End-to-end check in headless Chromium (Playwright). Not part of the app.
+// e2e in headless Chromium (Playwright).
 //   python test/make_room.py /tmp/rooms && python3 -m http.server 8765 &
 //   ASSETS=/tmp/rooms node test/e2e.mjs
 // env: ASSETS (make_room.py output, required), BASE_URL (default http://127.0.0.1:8765/),
@@ -34,12 +34,11 @@ async function newPage(opts, setup) {
   return { ctx, page, errors, warnings };
 }
 const idle = page => page.waitForFunction(() => window.app && document.getElementById('busy').hidden, null, { timeout: 30000 });
-// a scan is open when its bounds hold something
 const loaded = (page, timeout = 30000) => page.waitForFunction(() => window.app && !window.app.bounds.isEmpty() && document.getElementById('busy').hidden && document.getElementById('intro').hidden, null, { timeout });
 async function load(page, file) {
   await page.evaluate(() => window.app?.bounds.makeEmpty());
   await page.setInputFiles('#file', `${A}/${file}`);
-  await loaded(page, 10000).catch(() => console.log('(not opened:', file, ')')); // the checks after it FAIL, the run goes on
+  await loaded(page, 10000).catch(() => console.log('(not opened:', file, ')')); // FAIL the checks, don't abort
   await page.waitForTimeout(300);
 }
 async function click(page, sel) { await page.click(sel); await idle(page); } // axis/scale rebuild behind the busy overlay
@@ -49,14 +48,13 @@ const state = page => page.evaluate(() => {
   return { pos: camera.position.toArray().map(r), yaw: r(input.yaw), pitch: r(input.pitch),
     size: bounds.getSize(bounds.min.clone()).toArray().map(r), centre: bounds.getCenter(bounds.min.clone()).toArray().map(r), start: start.toArray().map(r) };
 });
-// camera readout: the numbers on screen (x y z m, pitch yaw roll deg) next to the camera's own
 const hud = page => page.evaluate(() => {
   const e = document.getElementById('hud'), { position: p, rotation: r } = window.app.camera, deg = v => v * 180 / Math.PI;
   return { shown: !!e && !e.hidden && e.getBoundingClientRect().height > 0, text: e?.textContent, n: (e?.textContent.match(/-?\d+(\.\d+)?/g) || []).map(Number),
     cam: [p.x, p.y, p.z, deg(r.x), ((deg(r.y) + 180) % 360 + 360) % 360 - 180, deg(r.z)], pressed: document.getElementById('coords')?.getAttribute('aria-pressed') };
 });
 const hudMatches = h => h.n.length === 6 && h.n.every((v, i) => near(v, h.cam[i], i < 3 ? 0.006 : 0.06));
-// x, y, z: the eye (camera) position
+// x, y, z: camera position
 const place = (page, x, y, z, yaw = 0, pitch = 0) => page.evaluate(([x, y, z, yaw, pitch]) => {
   const { camera, input } = window.app;
   camera.position.set(x, y, z); input.yaw = yaw; input.pitch = pitch;
@@ -71,7 +69,7 @@ const saved = page => page.evaluate(() => new Promise(res => {
   };
 }));
 const marker = page => page.evaluate(() => localStorage.getItem('scan-walk-opening'));
-// mean RGB of the canvas (background 0x111111 = 17), read right after the app's render
+// mean RGB of the canvas; background 0x111111 = 17
 const brightness = page => page.evaluate(() => new Promise(res => requestAnimationFrame(() => {
   const g = document.createElement('canvas').getContext('2d');
   g.canvas.width = g.canvas.height = 64;
@@ -81,7 +79,6 @@ const brightness = page => page.evaluate(() => new Promise(res => requestAnimati
   for (let i = 0; i < px.length; i += 4) sum += px[i] + px[i + 1] + px[i + 2];
   res(Math.round(sum / 3 / 4096));
 })));
-// small object scan (0.6m cube): flying outside it with the whole box on screen, and 처음 comes back to that view
 async function objectView(page, tag, file = 'object.usdz') {
   await load(page, file);
   const s = await state(page);
@@ -94,11 +91,11 @@ async function objectView(page, tag, file = 'object.usdz') {
     g.canvas.width = g.canvas.height = 64;
     g.drawImage(document.getElementById('c'), 0, 0, 64, 64);
     const px = g.getImageData(0, 0, 64, 64).data;
-    let fg = 0; // pixels that aren't the 0x111111 background
+    let fg = 0;
     for (let i = 0; i < px.length; i += 4) fg += Math.abs(px[i] - 17) + Math.abs(px[i + 1] - 17) + Math.abs(px[i + 2] - 17) > 30;
     res({ inView, outside: !bounds.containsPoint(camera.position), drawn: +(fg / 4096).toFixed(3) });
   })));
-  check(`${tag}: small object starts outside it, whole box in view and drawn`, v.inView && v.outside && v.drawn > 0.05, { ...v, pos: s.pos, centre: s.centre });
+  check(`${tag}: object scan starts outside, all in view`, v.inView && v.outside && v.drawn > 0.05, { ...v, pos: s.pos, centre: s.centre });
   await shot(page, `${tag}-object`);
   await place(page, 3, 1, 3, 1, -0.5);
   await click(page, '#reset');
@@ -113,7 +110,7 @@ async function objectView(page, tag, file = 'object.usdz') {
   await shot(page, 'd0-intro');
   await load(page, 'room_y.usdz');
   let s = await state(page);
-  check('load room_y: starts at eye height over the floor, under the bbox centre', near(s.start[0], 0, 0.01) && near(s.start[1], 1.6, 0.01) && near(s.start[2], 0.75, 0.01) && `${s.pos}` === `${s.start}`, s);
+  check('room_y: start 1.6m over floor, bbox centre', near(s.start[0], 0, 0.01) && near(s.start[1], 1.6, 0.01) && near(s.start[2], 0.75, 0.01) && `${s.pos}` === `${s.start}`, s);
   check('always flying: no walk/fly button', !(await page.$('#mode')), null);
   check('room_y size 6 x 2.6 x 6.5', near(s.size[0], 6, 0.01) && near(s.size[1], 2.6, 0.01) && near(s.size[2], 6.5, 0.01), s.size);
   await page.waitForSelector('#forget', { state: 'visible' });
@@ -121,12 +118,11 @@ async function objectView(page, tag, file = 'object.usdz') {
   check('IndexedDB keeps the File itself (not its bytes)', sv?.blob && sv.name === 'room_y.usdz' && sv.size === 6178, sv);
   await shot(page, 'd1-loaded-unlit');
 
-  // fixed-dt: forward goes where the camera looks, pitch included
   const pitched = await page.evaluate(() => {
     const { camera: c, start } = window.app, r = v => +v.toFixed(4), out = {};
     for (const [name, pitch] of [['up', 0.6], ['down', -0.6]]) {
       c.position.set(0, 2.6, 0.75);
-      for (let i = 0; i < 60; i++) window.app.fly?.(1 / 60, { x: 0, y: 1 }, 0, 0, pitch); // missing before the flight-only app: a FAIL, not a crash
+      for (let i = 0; i < 60; i++) window.app.fly?.(1 / 60, { x: 0, y: 1 }, 0, 0, pitch);
       out[name] = { dy: r(c.position.y - 2.6), dz: r(c.position.z - 0.75) };
     }
     c.position.copy(start);
@@ -135,7 +131,6 @@ async function objectView(page, tag, file = 'object.usdz') {
   check('fly: forward follows the view pitch, up and down', near(pitched.up.dy, 3 * Math.sin(0.6), 0.01) && near(pitched.down.dy, -3 * Math.sin(0.6), 0.01) &&
     [pitched.up, pitched.down].every(m => near(m.dz, -3 * Math.cos(0.6), 0.01)), pitched);
 
-  // fixed-dt: a viewer, not a game: nothing blocks, level into the step, down through the ceiling and the floor
   const descents = await page.evaluate(() => {
     const { camera: c, start } = window.app, r = v => +v.toFixed(3), out = {};
     for (const [name, x, y, z, yaw, fwd, up, n] of [['stepLevel', -0.5, 1.6, -1.5, Math.PI / 2, 1, 0, 30], ['ceiling', 0, 4.5, 0.75, 0, 0, -1, 120]]) {
@@ -146,8 +141,8 @@ async function objectView(page, tag, file = 'object.usdz') {
     c.position.copy(start);
     return out;
   });
-  check('fly level through the 0.18m step: no stepping up onto it', near(descents.stepLevel[1], 1.6, 0.01) && near(descents.stepLevel[0], -2, 0.01), descents.stepLevel);
-  check('fly down from above the ceiling: passes the ceiling and the floor, still descending', near(descents.ceiling[1], 0.5, 0.01), descents.ceiling);
+  check('fly level through the step', near(descents.stepLevel[1], 1.6, 0.01) && near(descents.stepLevel[0], -2, 0.01), descents.stepLevel);
+  check('fly down through ceiling and floor', near(descents.ceiling[1], 0.5, 0.01), descents.ceiling);
 
   await place(page, 0, -10.4, 0.75);
   await page.waitForTimeout(300);
@@ -183,14 +178,12 @@ async function objectView(page, tag, file = 'object.usdz') {
     combos[k] = (await hud(page)).shown;
   }
   check('desktop: ⌘C / Ctrl+C / Alt+C leave the readout alone', Object.values(combos).every(Boolean), combos);
-  // yaw past 180° reads as its turn the other way (4 rad = 229.2° = -130.8°); a hair under zero reads 0, not -0
   await place(page, -0.001, 0, 0.75, 4, -0.0001);
   await page.waitForTimeout(250);
   const hEdge = await hud(page);
   await hold(page, 'KeyC', 50);
   check('desktop: readout wraps yaw to ±180 and shows no -0', near(hEdge.n[4], -130.8, 0.06) && !/-0\.0+(?![0-9])/.test(hEdge.text), hEdge.text);
 
-  // no teleport: double-clicking the floor leaves you where you are
   await place(page, 0, 0, 0.75, 0, -0.5);
   await page.waitForTimeout(200);
   const before = (await state(page)).pos;
@@ -209,7 +202,7 @@ async function objectView(page, tag, file = 'object.usdz') {
   await objectView(page, 'desktop');
   await load(page, 'room_z.usdz');
   s = await state(page);
-  check('room_z (upAxis Z) upright by loader; starts at eye height over its floor', near(s.size[1], 2.6, 0.01) && near(s.start[1], 1.6, 0.01), s);
+  check('room_z (upAxis Z): upright, start 1.6m over floor', near(s.size[1], 2.6, 0.01) && near(s.start[1], 1.6, 0.01), s);
 
   await load(page, 'room_z_mislabeled.usdz');
   s = await state(page);
@@ -218,7 +211,7 @@ async function objectView(page, tag, file = 'object.usdz') {
   await click(page, '#axis');
   s = await state(page);
   const axisLabel = await page.textContent('#axis');
-  check('axis button -> +Z fixes it (y extent 2.6, eye 1.6m over the floor)', near(s.size[1], 2.6, 0.01) && near(s.start[1], 1.6, 0.01) && axisLabel.includes('+Z'), { s, axisLabel });
+  check('axis +Z fixes mislabeled scan', near(s.size[1], 2.6, 0.01) && near(s.start[1], 1.6, 0.01) && axisLabel.includes('+Z'), { s, axisLabel });
   await click(page, '#reset');
   await page.waitForTimeout(300);
   await shot(page, 'd7-mislabeled-fixed');
@@ -237,18 +230,15 @@ async function objectView(page, tag, file = 'object.usdz') {
 
   await load(page, 'room_nofloor.usdz');
   s = await state(page);
-  check('no floor (walls and ceiling only): starts with the eye at the centre, not on the ceiling', near(s.start[1], s.centre[1], 0.01), s);
+  check('no floor: start at bbox centre', near(s.start[1], s.centre[1], 0.01), s);
 
-  // floor only: a scan lower than the eye
   await load(page, 'room_flat.usdz');
   s = await state(page);
   check('floor only, lower than eye height: starts 1.6m over it', near(s.start[1], 1.6, 0.02), s);
-  // 3D Scanner App export: room turned off the axes, a hole under the bounding box centre, texture on emissiveColor
   await load(page, 'room_scanner.usdz');
   s = await state(page);
   const off = +Math.hypot(s.start[0] - s.centre[0], s.start[2] - s.centre[2]).toFixed(3);
-  check('scanner export: a hole under the centre still starts 1.6m over the floor level, at the centre', near(s.start[1], 1.6, 0.02) && off < 0.01, { ...s, off });
-  // real scans have holes in the floor: flying down over one keeps going below the scan's bottom
+  check('scanner export, hole under centre: start 1.6m over floor', near(s.start[1], 1.6, 0.02) && off < 0.01, { ...s, off });
   const holeDown = await page.evaluate(() => {
     const { camera: c, bounds: b, start } = window.app, m = b.getCenter(b.min.clone());
     c.position.set(m.x, 2.1, m.z);
@@ -257,13 +247,13 @@ async function objectView(page, tag, file = 'object.usdz') {
     c.position.copy(start);
     return out;
   });
-  check('scanner export: flying down over the hole passes below the bottom of the scan', near(holeDown.y, -2.9, 0.01) && holeDown.y < holeDown.bottom - 2.5, holeDown);
+  check('scanner export: fly down through the hole', near(holeDown.y, -2.9, 0.01) && holeDown.y < holeDown.bottom - 2.5, holeDown);
   const unlit = await brightness(page);
   await shot(page, 'd6b-scanner-unlit');
   await click(page, '#light');
   const lit = await brightness(page);
   await click(page, '#light');
-  check('scanner export: emissive texture with black diffuse is drawn, unlit and lit', unlit > 60 && lit > 60, { unlit, lit, background: 17 });
+  check('scanner export: emissive texture drawn, unlit and lit', unlit > 60 && lit > 60, { unlit, lit, background: 17 });
 
   await load(page, 'room_8k.usdz');
   await page.waitForTimeout(500);
@@ -274,9 +264,8 @@ async function objectView(page, tag, file = 'object.usdz') {
   await page.reload();
   await loaded(page);
   s = await state(page);
-  check('reload reopens the last file from IndexedDB and clears the reopen marker after drawing', near(s.size[0], 6, 0.01) && await cleared(page), s.size);
+  check('reload reopens last file, clears marker', near(s.size[0], 6, 0.01) && await cleared(page), s.size);
 
-  // a reopen that never finished (tab killed) must not be retried blindly
   await page.evaluate(() => localStorage.setItem('scan-walk-opening', '1'));
   await page.reload();
   await idle(page);
@@ -293,7 +282,7 @@ async function objectView(page, tag, file = 'object.usdz') {
   await idle(page);
   await page.waitForSelector('#again', { state: 'visible' });
   await load(page, 'room_z.usdz');
-  check('picking another file at the prompt clears the marker and saves it', (await marker(page)) === null && (await saved(page))?.name === 'room_z.usdz', await saved(page));
+  check('another file at the prompt: marker cleared, saved', (await marker(page)) === null && (await saved(page))?.name === 'room_z.usdz', await saved(page));
 
   await page.evaluate(() => localStorage.setItem('scan-walk-opening', '1'));
   await page.reload();
@@ -332,13 +321,12 @@ async function objectView(page, tag, file = 'object.usdz') {
   await page.context().close();
 }
 
-// ---------- point clouds: 3D Scanner App "XYZ color" (x,y,z,r,g,b, commas) and PLY (PCL ascii) ----------
+// ---------- point clouds ----------
 {
   const { page, errors, warnings } = await newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true });
   await idle(page);
   const fs = await import('node:fs');
   const lines = f => fs.readFileSync(`${A}/${f}`, 'latin1').split('\n').filter(l => l.trim()).length;
-  // the Points in the scene: count, colours (a hash of the attribute), size
   const cloud = () => page.evaluate(() => {
     let o = null;
     window.app.model?.traverse(x => { if (x.isPoints) o = x; });
@@ -353,9 +341,9 @@ async function objectView(page, tag, file = 'object.usdz') {
   const xyz = await cloud(), xyzPx = await brightness(page);
   await shot(page, 'p1-room-xyz');
   check('xyz: every line is a point, with colours', xyz?.n === lines('room.xyz') && xyz.color, xyz);
-  const drawn = xyz && +(xyz.size * Math.tan(35 * Math.PI / 180)).toFixed(4); // what sizeAttenuation draws at fov 70
-  check('xyz: points drawn 2cm across, in metres, like a LiDAR room scan\'s 1-3cm spacing', xyz?.atten && near(drawn, 0.02, 0.0005), { drawn, ...xyz });
-  check('xyz: starts at eye height over the floor, under the middle', near(s.start[1], 1.6, 0.03) && near(s.start[0], s.centre[0], 0.01) && near(s.start[2], s.centre[2], 0.01), s);
+  const drawn = xyz && +(xyz.size * Math.tan(35 * Math.PI / 180)).toFixed(4); // drawn diameter at fov 70
+  check('xyz: points 2cm across', xyz?.atten && near(drawn, 0.02, 0.0005), { drawn, ...xyz });
+  check('xyz: start 1.6m over floor, centre', near(s.start[1], 1.6, 0.03) && near(s.start[0], s.centre[0], 0.01) && near(s.start[2], s.centre[2], 0.01), s);
   check('xyz: no 조명 button for points (they are not lit)', await page.isHidden('#light'), null);
   const sv = await saved(page);
   check('xyz: remembered in IndexedDB', sv?.name === 'room.xyz', sv);
@@ -363,11 +351,10 @@ async function objectView(page, tag, file = 'object.usdz') {
   await load(page, 'room.ply');
   const ply = await cloud(), plyPx = await brightness(page);
   s = await state(page);
-  check('ply (PCL ascii, camera element after the vertices): every vertex is a point, normals dropped', ply?.n === lines('room.xyz') && ply.color && !ply.normals, ply);
+  check('ply (PCL ascii + camera element): all vertices, no normals', ply?.n === lines('room.xyz') && ply.color && !ply.normals, ply);
   check('the same scan as xyz and ply: same colours, same pixels', ply?.hash === xyz?.hash && xyzPx === plyPx && xyzPx > 25, { xyz: xyz?.hash, ply: ply?.hash, xyzPx, plyPx });
   check('ply: same start as xyz', near(s.start[1], 1.6, 0.03), s.start);
 
-  // one hand moves, the other looks, the readout follows: the same as a mesh scan
   const cdp = await page.context().newCDPSession(page);
   const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y, id]) => ({ x, y, id })) });
   await page.click('#coords', { timeout: 2000 }).catch(() => {});
@@ -382,14 +369,11 @@ async function objectView(page, tag, file = 'object.usdz') {
   check('points: the stick flies forward and the readout follows', s0.pos[2] - s.pos[2] > 0.5 && h.shown && hudMatches(h), { s0: s0.pos, pos: s.pos, h: h.n });
   await page.click('#coords', { timeout: 2000 }).catch(() => {});
 
-  // a site with no single floor: ground sloping 0-1.5m, a mezzanine at 3.5m, a roof at 7m. Start on the ground, not in the air or under it
   await load(page, 'site.xyz');
   s = await state(page);
   const floor = +(s.start[1] - 1.6).toFixed(3);
-  check('site with a sloped ground, a mezzanine and a roof: the floor found is the ground', floor >= -0.05 && floor <= 1.5, { floor, start: s.start, size: s.size });
+  check('sloped site with mezzanine and roof: floor = ground', floor >= -0.05 && floor <= 1.5, { floor, start: s.start, size: s.size });
 
-  // stray points far under the room (scanner noise) must not pull the start under it; NaN points in a PLY must not
-  // blank the screen; old Mac line ends (CR only) are still one point per line
   const upload = async (name, text) => {
     await page.evaluate(() => window.app.bounds.makeEmpty());
     await page.setInputFiles('#file', { name, mimeType: 'application/octet-stream', buffer: Buffer.from(text, 'latin1') });
@@ -402,10 +386,10 @@ async function objectView(page, tag, file = 'object.usdz') {
     await upload('ghost.xyz', roomXyz + extra);
     ghosts[name] = (await state(page)).start[1];
   }
-  check('xyz: stray points far under the room do not move the start', Object.values(ghosts).every(y => near(y, 1.6, 0.03)), ghosts);
+  check('xyz: stray points below do not move the start', Object.values(ghosts).every(y => near(y, 1.6, 0.03)), ghosts);
   await upload('cr.xyz', roomXyz.replace(/\n/g, '\r') + '1e999,0,0,9,9,9\r');
   let c = await cloud();
-  check('xyz: CR-only line ends read every line, an infinite one dropped', c?.n === n, { n: c?.n, want: n });
+  check('xyz: CR line ends; infinite point dropped', c?.n === n, { n: c?.n, want: n });
   const roomPly = fs.readFileSync(`${A}/room.ply`, 'latin1').split('\n');
   const body = roomPly.findIndex(l => l === 'end_header') + 1;
   for (let i = body; i < body + 3; i++) roomPly[i] = 'nan nan nan 0 0 0 0 0 1 0';
@@ -414,7 +398,7 @@ async function objectView(page, tag, file = 'object.usdz') {
   c = await cloud();
   s = await state(page);
   const nanPx = await brightness(page);
-  check('ply with NaN / inf points: they are dropped, the rest drawn, start on the floor', c?.n === n - 4 && nanPx > 25 && near(s.start[1], 1.6, 0.03), { n: c?.n, want: n - 4, nanPx, start: s.start });
+  check('ply with NaN/inf: dropped, rest drawn', c?.n === n - 4 && nanPx > 25 && near(s.start[1], 1.6, 0.03), { n: c?.n, want: n - 4, nanPx, start: s.start });
 
   await objectView(page, 'points', 'object.xyz');
   await load(page, 'object.ply');
@@ -434,7 +418,7 @@ async function objectView(page, tag, file = 'object.usdz') {
   check('an xyz with no points: message only, scan stays', (await page.textContent('#toast')).includes('열 수 없습니다') && (await cloud())?.n > 0, null);
 
   const unexpected = warnings.filter(w => !w.includes('점이 없습니다') && !w.includes('USDAParser'));
-  const errs = errors.filter(e => !e.includes('Computed radius is NaN')); // PLYLoader's own, parsing nan.ply, before the app drops them
+  const errs = errors.filter(e => !e.includes('Computed radius is NaN')); // logged by PLYLoader while parsing nan.ply
   check('points: no console errors or unexpected warnings', errs.length === 0 && unexpected.length === 0, { errors, unexpected });
   await page.context().close();
 }
@@ -451,7 +435,7 @@ async function objectView(page, tag, file = 'object.usdz') {
     await new Promise(r => setTimeout(r, 500));
     return { fetch: f, blocked };
   });
-  check('CSP: page cannot send data out (fetch and beacon blocked by connect-src)', net.fetch === 'blocked' && net.blocked.filter(b => b.startsWith('connect-src')).length === 2, { ...net, consoleErrors: errors.length });
+  check('CSP blocks fetch and beacon', net.fetch === 'blocked' && net.blocked.filter(b => b.startsWith('connect-src')).length === 2, { ...net, consoleErrors: errors.length });
   await page.context().close();
 
   const t = await newPage({}, p => p.route(LOADER_URL, async route => {
@@ -478,7 +462,6 @@ async function objectView(page, tag, file = 'object.usdz') {
   check('touch: room scan starts at eye height over the floor', near(s.start[1], 1.6, 0.01) && `${s.pos}` === `${s.start}`, s);
   const cdp = await page.context().newCDPSession(page);
   const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y, id]) => ({ x, y, id })) });
-  // one hand moves, the other looks: a stick where each thumb lands, left half moves, right half turns (90°/s at full tilt)
   const L = [80, 700], R = [300, 700];
   async function push([x, y], dx, dy, ms) {
     await touch('touchStart', [[x, y, 1]]);
@@ -487,13 +470,12 @@ async function objectView(page, tag, file = 'object.usdz') {
     await touch('touchEnd', []);
     await page.waitForTimeout(100);
   }
-  async function down([x, y], dx, dy, id) { // a thumb pushed and held; touchEnd lets go of all
+  async function down([x, y], dx, dy, id) {
     await touch('touchStart', [[x, y, id]]);
     await touch('touchMove', [[x + dx, y + dy, id]]);
   }
   const moved = (a, b) => +Math.hypot(b.pos[0] - a.pos[0], b.pos[2] - a.pos[2]).toFixed(3);
 
-  // flying forward goes where the camera looks: level holds the height, up climbs, down sinks through the floor
   const fwd = {};
   for (const [name, y, pitch, ms] of [['level', 2.6, 0, 500], ['up', 2.6, 0.6, 500], ['down', 1, -0.6, 1000]]) {
     await place(page, 0, y, 0.75, 0, pitch);
@@ -502,15 +484,15 @@ async function objectView(page, tag, file = 'object.usdz') {
     s = await state(page);
     fwd[name] = { dy: +(s.pos[1] - s0.pos[1]).toFixed(3), dz: +(s.pos[2] - s0.pos[2]).toFixed(3), y: s.pos[1] };
   }
-  check('touch: left stick forward, looking level, flies forward at that height', near(fwd.level.dy, 0, 0.02) && fwd.level.dz < -0.5, fwd.level);
-  check('touch: left stick forward, looking up, climbs as it goes', fwd.up.dy > 0.5 && fwd.up.dz < -0.5, fwd.up);
-  check('touch: left stick forward, looking down, sinks through the floor', fwd.down.y < -0.3 && fwd.down.dz < -0.5, fwd.down);
+  check('touch: left stick forward, level: same height', near(fwd.level.dy, 0, 0.02) && fwd.level.dz < -0.5, fwd.level);
+  check('touch: left stick forward, looking up: climbs', fwd.up.dy > 0.5 && fwd.up.dz < -0.5, fwd.up);
+  check('touch: left stick forward, looking down: through floor', fwd.down.y < -0.3 && fwd.down.dz < -0.5, fwd.down);
 
   await place(page, 0, 2.6, 0.75, 0, 0.6);
   s0 = await state(page);
   await push(L, 60, 0, 500);
   s = await state(page);
-  check('touch: left stick sideways strafes level without turning, even looking up', s.pos[0] - s0.pos[0] > 0.5 && near(s.pos[1], s0.pos[1], 0.02) && s.yaw === s0.yaw, { s0: s0.pos, pos: s.pos, yaw: [s0.yaw, s.yaw] });
+  check('touch: left stick sideways: level strafe', s.pos[0] - s0.pos[0] > 0.5 && near(s.pos[1], s0.pos[1], 0.02) && s.yaw === s0.yaw, { s0: s0.pos, pos: s.pos, yaw: [s0.yaw, s.yaw] });
   s0 = s;
   await page.waitForTimeout(500);
   s = await state(page);
@@ -521,9 +503,8 @@ async function objectView(page, tag, file = 'object.usdz') {
   await page.waitForTimeout(100);
   const half = await page.evaluate(() => +window.app.input.move.y.toFixed(3));
   await touch('touchEnd', []);
-  check('touch: half stick gives about a third of full speed (expo)', half > 0.25 && half < 0.4, { half });
+  check('touch: half stick ~1/3 speed (expo)', half > 0.25 && half < 0.4, { half });
 
-  // right stick held: the view keeps turning at a steady rate, stops on letting go, never moves you
   await place(page, 0, 1.9, 0.75);
   await down(R, 60, 0, 3);
   await page.waitForTimeout(250);
@@ -536,7 +517,7 @@ async function objectView(page, tag, file = 'object.usdz') {
   await page.waitForTimeout(400);
   s = await state(page);
   const rate = +((y1 - y2) / 0.5).toFixed(2);
-  check('touch: right stick held right keeps turning right, ~90°/s, and stops when let go', near(rate, Math.PI / 2, 0.25) && s.yaw === y3 && `${s.pos}` === '0,1.9,0.75', { rate, y1, y2, y3, after: s.yaw, pos: s.pos });
+  check('touch: right stick held: turns ~90°/s, stops on release', near(rate, Math.PI / 2, 0.25) && s.yaw === y3 && `${s.pos}` === '0,1.9,0.75', { rate, y1, y2, y3, after: s.yaw, pos: s.pos });
   await place(page, 0, 1.9, 0.75);
   await push(R, 0, -60, 500);
   s = await state(page);
@@ -549,7 +530,7 @@ async function objectView(page, tag, file = 'object.usdz') {
   await place(page, 0, 1.9, 0.75);
   await push([300, 200], 60, 0, 500);
   s = await state(page);
-  check('touch: the right stick works from high up the screen too', s.yaw < -0.5, s.yaw);
+  check('touch: right stick high on screen', s.yaw < -0.5, s.yaw);
 
   await click(page, '#reset');
   s0 = await state(page);
@@ -564,9 +545,8 @@ async function objectView(page, tag, file = 'object.usdz') {
   await touch('touchEnd', [[L[0], L[1] - 60, 1]]);
   await touch('touchEnd', []);
   s = await state(page);
-  check('touch: both thumbs at once: flies and keeps turning left', moved(s0, s) > 0.5 && s.yaw - s0.yaw > 0.8 && sticksOn === 2, { s0: s0.pos, pos: s.pos, yaw: s.yaw, sticksOn });
+  check('touch: both sticks at once', moved(s0, s) > 0.5 && s.yaw - s0.yaw > 0.8 && sticksOn === 2, { s0: s0.pos, pos: s.pos, yaw: s.yaw, sticksOn });
 
-  // a second finger on a half that already has its stick does nothing
   await click(page, '#reset');
   s0 = await state(page);
   await touch('touchStart', [[...L, 1]]);
@@ -578,7 +558,6 @@ async function objectView(page, tag, file = 'object.usdz') {
   s = await state(page);
   check('touch: a second finger on the move half is ignored', s.yaw === s0.yaw && s.pitch === s0.pitch && moved(s0, s) > 0.3, { s0, s });
 
-  // thumbs still down when the app loses focus: movement must stop
   await click(page, '#reset');
   await touch('touchStart', [[...L, 5]]);
   await touch('touchMove', [[L[0], L[1] - 60, 5]]);
@@ -593,7 +572,6 @@ async function objectView(page, tag, file = 'object.usdz') {
   await touch('touchEnd', []);
   check('touch: blur releases both sticks', a.pos[2] < 0.6 && `${a.pos}` === `${b.pos}` && a.pitch > 0.2 && a.pitch === b.pitch && !stickOn, { a: [a.pos, a.pitch], b: [b.pos, b.pitch], stickOn });
 
-  // no teleport: double-tapping the floor, on the look side or the move side, leaves you where you are
   await click(page, '#reset');
   await place(page, 0, 2.1, 0.75, 0, -0.6);
   await page.waitForTimeout(200);
@@ -607,11 +585,10 @@ async function objectView(page, tag, file = 'object.usdz') {
   s = await state(page);
   check('touch: double-tap on the floor does not move you', `${s.pos}` === `${s0.pos}`, { before: s0.pos, after: s.pos });
 
-  // camera readout: hidden by default, 좌표 shows it, it follows the stick and the view drag, and a reload keeps it on
   await click(page, '#reset');
   const h0 = await hud(page);
   check('touch: camera readout hidden by default', !h0.shown && h0.pressed === 'false', h0);
-  await page.click('#coords', { timeout: 2000 }).catch(() => {}); // a FAIL, not a crash, where it's missing
+  await page.click('#coords', { timeout: 2000 }).catch(() => {}); // FAIL, not abort, if missing
   await page.waitForTimeout(250);
   const h1 = await hud(page);
   await push(L, 0, -60, 500);
@@ -622,23 +599,22 @@ async function objectView(page, tag, file = 'object.usdz') {
   check('touch: 좌표 shows x y z and pitch yaw roll of the camera', h1.shown && h1.pressed === 'true' && hudMatches(h1), h1);
   check('touch: the readout follows both sticks', h2.shown && hudMatches(h2) && Math.hypot(h2.n[0] - h1.n[0], h2.n[2] - h1.n[2]) > 0.5 && Math.abs(h2.n[4] - h1.n[4]) > 10, { h1: h1.n, h2: h2.n });
   const row = await page.evaluate(() => [...document.querySelectorAll('#bar button')].filter(b => !b.hidden).map(b => { const r = b.getBoundingClientRect(); return [b.textContent, Math.round(r.top), Math.round(r.left), Math.round(r.right), +r.height.toFixed(1)]; }));
-  check('touch: 390px bar keeps every button on one row, 좌표 and 잊기 included, ~39px tall', row.length === 7 && row.every(b => b[1] === row[0][1] && b[2] >= 0 && b[3] <= 390 && b[4] >= 39), row);
+  check('touch: 390px bar on one row, ~39px tall', row.length === 7 && row.every(b => b[1] === row[0][1] && b[2] >= 0 && b[3] <= 390 && b[4] >= 39), row);
   await page.reload();
   await loaded(page);
   await page.waitForTimeout(250); // ~10Hz readout
   const h3 = await hud(page);
-  await page.click('#coords', { timeout: 2000 }).catch(() => {}); // a FAIL, not a crash, where it's missing
+  await page.click('#coords', { timeout: 2000 }).catch(() => {}); // FAIL, not abort, if missing
   const h4 = await hud(page);
-  check('touch: readout stays on after a reload, 좌표 again hides it', h3.shown && hudMatches(h3) && !h4.shown && h4.pressed === 'false', { h3, h4 });
+  check('touch: readout kept on after reload, 좌표 hides', h3.shown && hudMatches(h3) && !h4.shown && h4.pressed === 'false', { h3, h4 });
 
-  // resting guides, one per thumb, low on the screen: 이동 left, 시점 right; the old ▲▼ buttons are gone
   const guides = await page.evaluate(() => [...document.querySelectorAll('.stick')].map(e => {
     const r = e.getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2, left: r.left, right: r.right, bottom: r.bottom, w: r.width, label: getComputedStyle(e, '::after').content };
   }));
   const updown = await page.evaluate(() => !!document.getElementById('updown'));
   await shot(page, 'm3-guides');
-  check('touch: guides at the bottom, 이동 left and 시점 right; ▲▼ gone', guides.length === 2 && guides[0].x < 195 && guides[1].x > 195 &&
+  check('touch: guides 이동 left, 시점 right', guides.length === 2 && guides[0].x < 195 && guides[1].x > 195 &&
     guides[0].label === '"이동"' && guides[1].label === '"시점"' &&
     guides.every(g => g.w > 0 && g.y > 422 && g.left >= 0 && g.right <= 390 && g.bottom <= 844) && !updown, { guides, updown });
   await objectView(page, 'touch');
@@ -649,7 +625,7 @@ async function objectView(page, tag, file = 'object.usdz') {
   await page.context().close();
 }
 
-// ---------- landscape touch: same rule, left half moves, right half looks ----------
+// ---------- landscape touch ----------
 {
   const { page, errors } = await newPage({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true });
   await idle(page);
@@ -673,7 +649,7 @@ async function objectView(page, tag, file = 'object.usdz') {
   const ly2 = (await state(page)).yaw;
   await touch('touchEnd', []);
   s = await state(page);
-  check('touch landscape: right stick held left keeps turning left, without moving', ly2 - ly1 > 0.5 && `${s.pos}` === `${s0.pos}` && errors.length === 0, { ly1, ly2, s0: s0.pos, pos: s.pos, errors });
+  check('touch landscape: right stick turns', ly2 - ly1 > 0.5 && `${s.pos}` === `${s0.pos}` && errors.length === 0, { ly1, ly2, s0: s0.pos, pos: s.pos, errors });
   await page.context().close();
 }
 

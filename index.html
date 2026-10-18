@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<!-- the scan never leaves the page: no fetch/XHR/WebSocket/beacon, images only from here or the file itself -->
+<!-- no network out: the scan stays on the device -->
 <meta http-equiv="Content-Security-Policy" content="connect-src 'none'; img-src 'self' blob: data:">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -28,7 +28,6 @@
   .stick::after { content: attr(data-label); position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 6px; font-size: 13px; white-space: nowrap; }
   .stick.on { display: block; }
   .stick.on::after { display: none; }
-  /* resting spots: a stick appears where each thumb lands, left moves and right turns; these only show which side does what */
   @media (pointer: coarse) {
     .stick { display: block; opacity: .4; }
     #stick { transform: translate(calc(env(safe-area-inset-left) + 92px), calc(100dvh - env(safe-area-inset-bottom) - 110px)); }
@@ -84,11 +83,10 @@
 </div>
 <div id="intro">
   <h1>scan-walk</h1>
-  <p>3D Scanner App 에서 내보낸 USDZ, 점(PLY·XYZ)을 열어 날아다니며 봅니다. 파일은 이 기기 밖으로 나가지 않습니다.</p>
+  <p>LiDAR 스캔(USDZ·PLY·XYZ)을 열어 날아다니며 봅니다. 파일은 이 기기 밖으로 나가지 않습니다.</p>
   <button id="intro-open">스캔 열기</button>
-  <p>폰: 두 엄지에 스틱이 하나씩 생깁니다. 왼쪽은 이동, 오른쪽은 시점(밀고 있는 동안 돕니다). 보는 방향으로 나아갑니다.<br>
-     PC: 파일을 끌어다 놓기. 클릭 후 마우스로 시점, WASD 로 보는 방향 이동, Space/E 위로, Shift/Q 아래로.<br>
-     바닥 위 눈높이에서 시작합니다. 벽도 바닥도 지나갑니다.</p>
+  <p>폰: 왼쪽 엄지 이동, 오른쪽 엄지 시점.<br>
+     PC: 파일 끌어다 놓기. 클릭 후 마우스 시점, WASD 이동, Space/E 위, Shift/Q 아래.</p>
   <p id="msg"></p>
   <p id="again" hidden><button id="reopen">다시 열기</button> <button id="again-forget">잊기</button></p>
 </div>

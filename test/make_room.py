@@ -4,15 +4,14 @@ Room 6m (x) x 5m (z), walls 2.6m, door gap (0.9m x 2.1m) in the +z wall,
 box obstacle 1m cube at (1.8, 0, -1.2), step 0.18m platform at x in [-3,-1.5], z in [-2.5,-0.5].
 Outputs: room_y.usdz (upAxis Y), room_z.usdz (Z-up geometry, upAxis Z),
 room_z_mislabeled.usdz (Z-up geometry, upAxis Y declared), room_cm.usdz (centimetres, metersPerUnit 0.01),
-room_nofloor.usdz (walls and ceiling only: nowhere to stand), room_flat.usdz (floor only: a terrace,
-lower than eye height), room_8k.usdz (8192px texture),
+room_nofloor.usdz (walls and ceiling only), room_flat.usdz (floor only), room_8k.usdz (8192px texture),
 room_scanner.usdz (as 3D Scanner App exports: black diffuseColor with the texture on emissiveColor,
 turned 30 deg about up, a 1.2m hole in the floor under the bounding box centre),
-object.usdz (closed 0.6m cube, centre (0.5, 0.3, -0.2): an object scan, not a room).
-Point clouds as 3D Scanner App exports them, the same points in both formats: room_y's surfaces every 5cm as
+object.usdz (closed 0.6m cube, centre (0.5, 0.3, -0.2)).
+Point clouds, the same points in both formats: room_y's surfaces every 5cm as
 room.xyz (x,y,z,r,g,b per line, commas, no header) and room.ply (ascii, PCL style: normals, curvature and a camera
 element after the vertices); object.xyz / object.ply (the cube); site.xyz (40 x 24m, ground sloping 0-1.5m,
-a mezzanine at 3.5m, a roof at 7m: no single floor level).
+a mezzanine at 3.5m, a roof at 7m).
 """
 import math, os, sys, zipfile
 from PIL import Image, ImageDraw
@@ -162,7 +161,7 @@ def write_points(name, cloud):
 
 write_points('room', sample(range(len(counts)), 0.05))
 
-# a site with no single floor level: ground sloping up 1.5m along x, a mezzanine at 3.5m, a roof at 7m, two end walls
+# site: ground sloping up 1.5m along x, a mezzanine at 3.5m, a roof at 7m, two end walls
 site = []
 grid = lambda x0, x1, z0, z1, sp: ((x0 + i * sp, z0 + j * sp) for i in range(int((x1 - x0) / sp) + 1) for j in range(int((z1 - z0) / sp) + 1))
 for x, z in grid(-20, 20, -12, 12, 0.2):
@@ -187,7 +186,7 @@ for fx0, fz0, fx1, fz1 in [(-X, -Z, x0, Z), (x1, -Z, X, Z), (x0, -Z, x1, z0), (x
     quad((fx0, 0, fz1), (fx1, 0, fz1), (fx1, 0, fz0), (fx0, 0, fz0), 'floor')
 write('room_scanner', UsdGeom.Tokens.y, 1.0, turn, faces=slice(1, None), emissive=True)
 
-# object scan: one closed box, so a ray down from its centre hits its bottom like on a real scanned thing
+# object scan: one closed 0.6m box
 del pts[:], counts[:], idx[:], st[:]
 box(0.2, 0, -0.5, 0.8, 0.6, 0.1, 'box')
 quad((0.2, 0, -0.5), (0.8, 0, -0.5), (0.8, 0, 0.1), (0.2, 0, 0.1), 'box')  # bottom
