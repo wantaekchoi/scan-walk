@@ -519,9 +519,14 @@ async function objectView(page, tag, file = 'object.usdz') {
   const rate = +((y1 - y2) / 0.5).toFixed(2);
   check('touch: right stick held: turns ~90°/s, stops on release', near(rate, Math.PI / 2, 0.25) && s.yaw === y3 && `${s.pos}` === '0,1.9,0.75', { rate, y1, y2, y3, after: s.yaw, pos: s.pos });
   await place(page, 0, 1.9, 0.75);
-  await push(R, 0, -60, 500);
-  s = await state(page);
-  check('touch: right stick up looks up', s.pitch > 0.5 && s.pitch < 1, s.pitch);
+  await down(R, 0, -60, 3);
+  await page.waitForTimeout(150);
+  const p1 = (await state(page)).pitch;
+  await page.waitForTimeout(400);
+  const p2 = (await state(page)).pitch;
+  await touch('touchEnd', []);
+  const pitchRate = +((p2 - p1) / 0.4).toFixed(2);
+  check('touch: right stick up looks up ~90°/s', near(pitchRate, Math.PI / 2, 0.25), { pitchRate, p1, p2 });
   await push(R, 0, -60, 2500);
   const up = (await state(page)).pitch;
   await push(R, 0, 60, 4500);
