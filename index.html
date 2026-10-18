@@ -23,9 +23,9 @@
   button[aria-pressed="true"] { background: rgba(240, 240, 240, .9); color: #111; }
   #bar { position: fixed; top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); left: max(10px, env(safe-area-inset-left)); display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; pointer-events: none; }
   #bar button { pointer-events: auto; }
-  #updown { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); display: none; flex-direction: column; gap: 12px; }
-  #updown button { width: 64px; height: 64px; font-size: 22px; border-radius: 50%; }
-  body.fly #updown { display: flex; }
+  #updown { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; pointer-events: none; }
+  #updown button { width: 64px; height: 64px; font-size: 22px; border-radius: 50%; pointer-events: auto; }
+  body:not(.fly) #down { visibility: hidden; } /* keeps ▲ in the same spot in both modes */
   #stick { position: fixed; left: 0; top: 0; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .5); background: rgba(255, 255, 255, .08); pointer-events: none; display: none; opacity: .8; }
   #stick div { position: absolute; left: 32px; top: 32px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255, 255, 255, .6); }
   #stick.on { display: block; }
@@ -83,8 +83,9 @@
   <h1>scan-walk</h1>
   <p>3D Scanner App 에서 내보낸 USDZ 를 열어 걸어 다닙니다. 파일은 이 기기 밖으로 나가지 않습니다.</p>
   <button id="intro-open">USDZ 열기</button>
-  <p>폰: 왼쪽 엄지로 이동, 오른쪽 드래그로 시점, 바닥 두 번 탭으로 순간이동.<br>
-     PC: 파일을 끌어다 놓기. 클릭 후 마우스로 시점, WASD 이동, 더블클릭 순간이동, 비행 중 Space/Shift 위아래.</p>
+  <p>폰: 왼쪽 엄지로 이동, 오른쪽 드래그로 시점, ▲ 로 날아오르기, 바닥 두 번 탭으로 순간이동(비행 중이면 내려앉기).<br>
+     PC: 파일을 끌어다 놓기. 클릭 후 마우스로 시점, WASD 이동, 더블클릭 순간이동, Space/E 로 날아오르고 비행 중 Shift/Q 로 내려가기.<br>
+     비행 중엔 위·아래를 보고 밀면 그쪽으로 오르내린다.</p>
   <p id="msg"></p>
   <p id="again" hidden><button id="reopen">다시 열기</button> <button id="again-forget">잊기</button></p>
 </div>

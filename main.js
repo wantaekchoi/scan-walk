@@ -142,7 +142,6 @@ function rebuild() {
   start.copy(hit ? hit.point : raycaster.ray.origin.setY(raycaster.ray.origin.y - EYE));
   $('axis').textContent = `축 ${AXES[axis][0]}`;
   $('scale').textContent = `×${SCALES[scale]}`;
-  setFly(!startOnFloor);
   resetView();
 }
 
@@ -151,7 +150,7 @@ function resetView() {
   player.vy = 0;
   player.grounded = false;
   player.lastFloor = startOnFloor ? start.clone() : null;
-  if (!startOnFloor) setFly(true);
+  setFly(!startOnFloor); // ▲ makes flying common: 처음 also lands a room scan back in walk mode
   input.yaw = input.pitch = 0;
 }
 
@@ -173,6 +172,7 @@ function teleport(x, y) {
   player.pos.copy(hit.point);
   player.vy = 0;
   player.grounded = false;
+  setFly(false); // double-tap while flying = land there, the way back from an accidental ▲
 }
 
 function setFly(on) {
@@ -201,7 +201,7 @@ for (const [id, dir] of [['up', 1], ['down', -1]]) {
   b.onpointerup = b.onpointercancel = () => { input.buttonUp = 0; };
 }
 
-// a focused button would also fire on Space (fly up)
+// a focused button would also fire on Space (take off / fly up)
 document.addEventListener('click', e => e.target.closest?.('button')?.blur());
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => {
@@ -234,7 +234,8 @@ renderer.setAnimationLoop(t => {
   const dt = Math.min(timer.getDelta(), 0.1);
   if (player.bvh) {
     input.poll();
-    player.update(dt, input.move, input.up, input.yaw);
+    if (input.up > 0 && !player.fly) setFly(true); // ▲ / Space while walking takes off
+    player.update(dt, input.move, input.up, input.yaw, input.pitch);
     if (player.pos.y < bounds.min.y - 10) { // fell through a hole: back to where we last stood
       if (player.lastFloor) {
         player.pos.copy(player.lastFloor);

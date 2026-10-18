@@ -52,6 +52,7 @@ const place = (page, x, y, z, yaw = 0, pitch = 0) => page.evaluate(([x, y, z, ya
   const { player, input } = window.app;
   player.pos.set(x, y, z); player.vy = 0; player.grounded = false; input.yaw = yaw; input.pitch = pitch;
 }, [x, y, z, yaw, pitch]);
+const setMode = async (page, fly) => { if ((await state(page)).fly !== fly) await click(page, '#mode'); };
 async function hold(page, key, ms) { await page.keyboard.down(key); await page.waitForTimeout(ms); await page.keyboard.up(key); await page.waitForTimeout(150); }
 const saved = page => page.evaluate(() => new Promise(res => {
   const req = indexedDB.open('scan-walk', 1);
@@ -149,12 +150,41 @@ async function objectView(page, tag) {
   });
   check('falling 1-15m at 30/20/16/10 fps never passes through the floor', Object.values(falls).every(v => v.startsWith('0/')), falls);
 
+  // fixed-dt: flying forward follows the view pitch past a 0.2 rad dead zone, walking never does
+  const pitched = await page.evaluate(() => {
+    const p = window.app.player, r = v => +v.toFixed(4), out = {};
+    for (const [name, fly, y, pitch, n] of [['up', true, 1, 0.6, 60], ['down', true, 1, -0.6, 60], ['deadzone', true, 1, 0.15, 60], ['walk', false, 0, -0.6, 30]]) {
+      p.fly = fly; p.pos.set(0, y, 0.75); p.vy = 0; p.grounded = false;
+      for (let i = 0; i < n; i++) p.update(1 / 60, { x: 0, y: 1 }, 0, 0, pitch);
+      out[name] = { dy: r(p.pos.y - y), dz: r(p.pos.z - 0.75) };
+    }
+    p.fly = false; p.pos.set(0, 0, 0.75); p.grounded = false;
+    return out;
+  });
+  check('fly: looking up and pushing forward climbs along the view', near(pitched.up.dy, 1.168, 0.01) && near(pitched.up.dz, -2.763, 0.01), pitched.up);
+  check('fly: looking down and pushing forward descends', near(pitched.down.dy, -1.168, 0.01), pitched.down);
+  check('fly: inside the pitch dead zone forward stays level', near(pitched.deadzone.dy, 0, 1e-6) && near(pitched.deadzone.dz, -3, 0.01), pitched.deadzone);
+  check('walk: forward ignores the view pitch', near(pitched.walk.dy, 0, 0.02) && pitched.walk.dz < -0.5, pitched.walk);
+
   await place(page, 0, 0, 3.3);
   await page.waitForTimeout(300);
   await place(page, 5, 0, 3.3);
   await page.waitForTimeout(2500);
   s = await state(page);
   check('walking off into the void returns to the last floor stood on', near(s.pos[0], 0, 0.01) && near(s.pos[1], 0, 0.02) && near(s.pos[2], 3.3, 0.01), s.pos);
+
+  await click(page, '#reset');
+  let y1 = (await state(page)).pos[1];
+  await hold(page, 'Space', 600);
+  s = await state(page);
+  check('walk: Space takes off into fly mode and rises', s.fly && (await page.textContent('#mode')) === '비행' && s.pos[1] > y1 + 0.5, { y1, y: s.pos[1], fly: s.fly });
+  await setMode(page, false);
+  await place(page, 0, 0, 0.75); // back on the floor: 1.8m up the head is through the 2.6m ceiling and stuck there
+  await page.waitForFunction(() => window.app.player.grounded, null, { timeout: 5000 }).catch(() => {});
+  y1 = (await state(page)).pos[1];
+  await hold(page, 'ShiftLeft', 600);
+  s = await state(page);
+  check('walk: Shift does nothing (no descent while walking)', !s.fly && near(s.pos[1], y1, 0.02), { y1, y: s.pos[1], fly: s.fly });
 
   await click(page, '#reset');
   await click(page, '#mode');
@@ -166,8 +196,13 @@ async function objectView(page, tag) {
   s = await state(page);
   check('fly: Space rises and does not re-trigger the clicked button', s.fly && s.pos[1] > y0 + 0.5, { y0, y: s.pos[1], fly: s.fly });
   await shot(page, 'd4-fly-outside');
-  await click(page, '#mode');
+  await place(page, 0, 1, 0.75, 0, 0.6);
+  await hold(page, 'KeyW', 1000);
+  s = await state(page);
+  check('fly: W while looking up climbs', s.fly && s.pos[1] > 1.8, s.pos);
   await click(page, '#reset');
+  s = await state(page);
+  check('room scan: 처음 lands back in walk mode', !s.fly && (await page.textContent('#mode')) === '걷기', s);
 
   await place(page, 0, 0, 0.75, 0, -0.5);
   await page.waitForTimeout(200);
@@ -374,6 +409,61 @@ async function objectView(page, tag) {
   s = await state(page);
   const counts = await page.evaluate(() => ({ teleports: window.__moves, dblclickEvents: window.__dbl }));
   check('touch: double-tap floor teleports exactly once', near(s.pos[1], 0, 0.02) && s.pos[2] < s0.pos[2] - 0.3 && counts.teleports === 1, { before: s0.pos, after: s.pos, ...counts });
+
+  // walking: ▲ shows (▼ keeps its spot hidden), and holding it takes off
+  const rect = sel => page.evaluate(sel => { const r = document.querySelector(sel).getBoundingClientRect(); return r.width ? { x: r.x + r.width / 2, y: r.y + r.height / 2, top: r.top, bottom: r.bottom } : null; }, sel);
+  const vis = await page.evaluate(() => [getComputedStyle(document.getElementById('up')).visibility, getComputedStyle(document.getElementById('down')).visibility, getComputedStyle(document.getElementById('updown')).display]);
+  let up = await rect('#up'), y2 = (await state(page)).pos[1];
+  if (up) {
+    await touch('touchStart', [[up.x, up.y, 6]]);
+    await page.waitForTimeout(600);
+    await shot(page, 'm3a-walk-up');
+    await touch('touchEnd', []);
+  }
+  s = await state(page);
+  check('touch: walking shows ▲ (▼ hidden), holding it takes off', up && vis[0] === 'visible' && vis[1] === 'hidden' && s.fly && (await page.textContent('#mode')) === '비행' && s.pos[1] > y2 + 0.5, { vis, up, y2, y: s.pos[1], fly: s.fly });
+
+  // flying: double-tap the floor lands there in walk mode
+  await setMode(page, true);
+  await place(page, 0, 0.5, 0.75, 0, -0.6);
+  await page.waitForTimeout(400);
+  await page.touchscreen.tap(220, 600);
+  await page.waitForTimeout(120);
+  await page.touchscreen.tap(220, 600);
+  await page.waitForTimeout(500);
+  s = await state(page);
+  check('touch: flying, double-tap floor lands there walking', !s.fly && (await page.textContent('#mode')) === '걷기' && near(s.pos[1], 0, 0.02) && s.pos[2] < 0.45, s.pos);
+
+  // walking: thumb on the stick, other thumb on ▲: goes forward and up at once
+  await setMode(page, false);
+  await page.evaluate(() => { window.app.input.pitch = 0; });
+  s0 = await state(page);
+  up = await rect('#up');
+  if (up) {
+    await touch('touchStart', [[80, 700, 7]]);
+    await touch('touchMove', [[80, 640, 7]]);
+    await touch('touchStart', [[80, 640, 7], [up.x, up.y, 8]]);
+    await page.waitForTimeout(600);
+    await touch('touchEnd', [[80, 640, 7]]);
+    await touch('touchEnd', []);
+  }
+  s = await state(page);
+  check('touch: stick + ▲ together move forward and climb', up && s.fly && Math.hypot(s.pos[0] - s0.pos[0], s.pos[2] - s0.pos[2]) > 0.5 && s.pos[1] > s0.pos[1] + 0.5, { up, s0: s0.pos, pos: s.pos });
+
+  // the ▲▼ column must not swallow look drags that start beside the buttons
+  await setMode(page, true);
+  up = await rect('#up');
+  const down = await rect('#down');
+  // hit test, not a drag: Chromium's touch adjustment snaps a touch 6px from ▼ onto ▼ (a finger is wider than the gap anyway)
+  const gapEl = await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.id, [up.x, (up.bottom + down.top) / 2]);
+  check('touch: flying, the gap between ▲ and ▼ belongs to the view, not the button column', gapEl === 'c', { gapEl });
+  await setMode(page, false);
+  const yaw1 = (await state(page)).yaw;
+  await touch('touchStart', [[down.x, down.y, 9]]);
+  for (let i = 1; i <= 10; i++) { await touch('touchMove', [[down.x - i * 5, down.y, 9]]); await page.waitForTimeout(20); }
+  await touch('touchEnd', []);
+  const hiddenYaw = +((await state(page)).yaw - yaw1).toFixed(3);
+  check('touch: walking, a drag from the hidden ▼ spot turns the view', near(hiddenYaw, 0.3, 0.05), { hiddenYaw });
 
   await page.tap('#mode');
   await page.waitForTimeout(200);
