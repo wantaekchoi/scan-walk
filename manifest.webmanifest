@@ -1,7 +1,7 @@
 {
   "name": "scan-walk",
   "short_name": "scan-walk",
-  "description": "USDZ 방 스캔을 한 손 이동, 한 손 시점으로 날고 걸으며 보기",
+  "description": "USDZ 방 스캔을 한 손 이동, 한 손 시점으로 날아다니며 보기",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

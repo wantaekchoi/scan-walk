@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { USDLoader } from 'three/addons/loaders/USDLoader.js';
-import { MeshBVH, StaticGeometryGenerator } from 'three-mesh-bvh';
-import { Player, EYE } from './player.js';
 import { setupInput } from './input.js';
+
+const EYE = 1.6, FLY = 3, CLIMB = 2; // eye height over the floor (m), forward and up/down speed (m/s)
 
 const $ = id => document.getElementById(id);
 const canvas = $('c');
@@ -21,11 +21,10 @@ camera.rotation.order = 'YXZ';
 const fix = new THREE.Group(); // manual axis/scale correction on top of the file's upAxis/metersPerUnit
 scene.add(fix);
 
-const player = new Player();
 const input = setupInput(canvas, $('stick'));
-const start = new THREE.Vector3();
-const bounds = player.bounds;
-let model = null, lit = false, axis = 0, scale = 0, startOnFloor = true, saved = null;
+const start = new THREE.Vector3(); // where the eye (the camera) starts
+const bounds = new THREE.Box3();
+let model = null, lit = false, axis = 0, scale = 0, saved = null;
 
 // which file axis becomes up: rotation that maps it onto +Y
 const AXES = [['+Y', 0, 0], ['+Z', -Math.PI / 2, 0], ['-Z', Math.PI / 2, 0], ['+X', 0, Math.PI / 2], ['-X', 0, -Math.PI / 2], ['-Y', Math.PI, 0]];
@@ -63,7 +62,7 @@ async function open(file, save = true) {
     let meshes = 0;
     group.traverse(o => o.isMesh && meshes++);
     if (!meshes) throw new Error('메시가 없습니다');
-    busy('충돌 계산 중');
+    busy('바닥 찾는 중');
     await nextPaint();
     setModel(group);
     $('intro').hidden = true;
@@ -123,77 +122,91 @@ function setModel(group) {
   rebuild();
 }
 
-// bake the world-space collider and BVH once per load / axis / scale change
+// place the scan and find where to start, once per load / axis / scale change
 function rebuild() {
   fix.rotation.set(AXES[axis][1], 0, AXES[axis][2]);
   fix.scale.setScalar(SCALES[scale]);
   fix.updateMatrixWorld(true);
-  const gen = new StaticGeometryGenerator(model);
-  gen.attributes = ['position'];
-  const geom = gen.generate();
-  player.bvh = new MeshBVH(geom);
-  geom.computeBoundingBox();
-  bounds.copy(geom.boundingBox);
-  // start: the floor nearest below the bounding box centre, or flying with the eye at the centre when there is none
+  bounds.makeEmpty();
+  const ys = [], ws = [];
+  model.traverse(o => o.isMesh && heights(o, ys, ws));
   const centre = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
   // object, not a room: under ~2m (door height, two strides) across both ways, or narrow one way and low (a slide, a car)
   const object = Math.max(size.x, size.z) < 2 || (size.y < 2 && Math.min(size.x, size.z) < 2);
-  const hit = !object && startFloor(centre, size);
-  startOnFloor = !!hit;
-  // object: fly at its centre's height, backed off along +z (yaw 0 looks at it) until its bounding sphere fits the narrower FOV
+  const floor = object ? null : floorHeight(ys, ws);
+  // object: its centre's height, backed off along +z (yaw 0 looks at it) until its bounding sphere fits the narrower FOV
   if (object) centre.z += size.length() / 2 / Math.sin(Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(camera.aspect, 1)));
-  start.copy(hit ? hit.point : centre.setY(centre.y - EYE));
+  // a room: eye height over its floor, under the middle of the scan (holes don't matter, nothing blocks); no floor: the middle
+  start.copy(centre);
+  if (floor !== null) start.y = floor + EYE;
   $('axis').textContent = `축 ${AXES[axis][0]}`;
   $('scale').textContent = `×${SCALES[scale]}`;
   resetView();
 }
 
 function resetView() {
-  player.pos.copy(start);
-  player.vy = 0;
-  player.grounded = false;
-  player.lastFloor = startOnFloor ? start.clone() : null;
-  setFly(true); // every scan starts flying, a room hovering at eye height over its floor
+  camera.position.copy(start);
   input.yaw = input.pitch = 0;
 }
 
+// world-space heights for finding the floor, and the bounds: each triangle's middle, weighted by its area seen
+// from above, so a wall counts for nothing and a floor counts the same however finely it is meshed
+function heights(o, ys, ws) {
+  const g = o.geometry, p = g.attributes.position, idx = g.index, v = new THREE.Vector3();
+  const w = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld).toArray(w, i * 3);
+    bounds.expandByPoint(v);
+  }
+  const n = idx ? idx.count : p.count;
+  for (let k = 0; k + 2 < n; k += 3) {
+    const a = (idx ? idx.getX(k) : k) * 3, b = (idx ? idx.getX(k + 1) : k + 1) * 3, c = (idx ? idx.getX(k + 2) : k + 2) * 3;
+    const area = Math.abs((w[b + 2] - w[a + 2]) * (w[c] - w[a]) - (w[b] - w[a]) * (w[c + 2] - w[a + 2])) / 2; // |cross.y| / 2
+    if (area) { ys.push((w[a + 1] + w[b + 1] + w[c + 1]) / 3); ws.push(area); }
+  }
+}
+
+// The floor: the lowest height layer (15cm) holding at least 30% of the heaviest one, in the lower half of the scan.
+// Floor and ceiling are the two big horizontal layers and the ceiling is in the upper half; a bed or table top is smaller.
+// null when there is none (walls and ceiling only).
+const BIN = 0.05;
+function floorHeight(ys, ws) {
+  const lo = bounds.min.y, nb = Math.floor((bounds.max.y - lo) / BIN) + 1, h = new Float64Array(nb);
+  ys.forEach((y, i) => { h[Math.min(nb - 1, Math.floor((y - lo) / BIN))] += ws[i]; });
+  const win = i => (h[i - 1] || 0) + h[i] + (h[i + 1] || 0); // a noisy floor straddling two bins still counts whole
+  let max = 0;
+  for (let i = 0; i < nb; i++) max = Math.max(max, win(i));
+  const mid = (bounds.min.y + bounds.max.y) / 2;
+  for (let i = 0; i < nb && lo + i * BIN <= mid; i++) {
+    if (!max || win(i) < 0.3 * max) continue;
+    const y0 = lo + (i + 0.5) * BIN; // that layer's weighted mean height
+    let s = 0, sw = 0;
+    ys.forEach((y, k) => { if (Math.abs(y - y0) <= 1.5 * BIN) { s += y * ws[k]; sw += ws[k]; } });
+    return s / sw;
+  }
+  return null;
+}
+
+// Free flight, nothing blocks (a viewer, not a game): forward goes where the camera looks, pitch included; sideways stays level.
+// move: {x: right, y: forward} with length <= 1, up: -1..1 (keys).
+// ponytail: no inertia, stops the moment the stick is let go; ease the speed if a glide is wanted
+function fly(dt, move, up, yaw, pitch) {
+  const s = Math.sin(yaw), c = Math.cos(yaw), ch = Math.cos(pitch), k = FLY * dt;
+  camera.position.x += (move.x * c - move.y * ch * s) * k;
+  camera.position.y += move.y * Math.sin(pitch) * k + up * CLIMB * dt;
+  camera.position.z += (-move.x * s - move.y * ch * c) * k;
+}
+
 async function rebuildBusy() {
-  busy('충돌 계산 중');
+  busy('바닥 찾는 중');
   await nextPaint();
   rebuild();
   busy(null);
 }
 
-// straight down from the centre, else from a 33x33 grid over the scan, nearest the centre first:
-// real scans have holes, and a bit scanned through a window moves the box centre off the floor
-function startFloor(centre, size) {
-  const ray = new THREE.Ray(centre.clone(), new THREE.Vector3(0, -1, 0));
-  const pts = [];
-  for (let i = 0; i <= 32; i++) for (let j = 0; j <= 32; j++) pts.push([(i / 32 - 0.5) * size.x, (j / 32 - 0.5) * size.z]);
-  pts.sort((a, b) => Math.hypot(...a) - Math.hypot(...b)); // [0, 0] first
-  for (const [dx, dz] of pts) {
-    ray.origin.set(centre.x + dx, centre.y, centre.z + dz);
-    const hit = player.floorAlong(ray);
-    if (hit) return hit;
-  }
-  return null;
-}
-
-function setFly(on) {
-  // landing: flying passes through floors, so feet under one stand on it instead of wedging the capsule in it.
-  // The ray starts at the eye: the floor you look down on, not an upper storey of the scan. Above a floor you fall as before
-  if (!on && player.fly && player.bvh) {
-    const hit = player.floorAlong(new THREE.Ray(player.pos.clone().setY(player.pos.y + EYE), new THREE.Vector3(0, -1, 0)));
-    if (hit && hit.point.y > player.pos.y) player.pos.y = hit.point.y;
-  }
-  player.fly = on;
-  $('mode').textContent = on ? '비행' : '걷기';
-}
-
 $('open').onclick = $('intro-open').onclick = () => $('file').click();
 $('file').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) open(f); };
-$('mode').onclick = () => setFly(!player.fly);
 $('light').onclick = () => {
   lit = !lit;
   $('light').setAttribute('aria-pressed', lit);
@@ -219,7 +232,7 @@ try { showCoords(!!localStorage.getItem(COORDS)); } catch { showCoords(false); }
 $('coords').onclick = () => showCoords(hud.hidden);
 addEventListener('keydown', e => { if (e.code === 'KeyC' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) showCoords(hud.hidden); });
 
-// a focused button would also fire on Space (take off / fly up)
+// a focused button would also fire on Space (fly up)
 document.addEventListener('click', e => e.target.closest?.('button')?.blur());
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => {
@@ -250,19 +263,10 @@ timer.connect(document); // no huge step after the tab was hidden
 renderer.setAnimationLoop(t => {
   timer.update(t);
   const dt = Math.min(timer.getDelta(), 0.1);
-  if (player.bvh) {
+  if (model) {
     input.poll();
-    if (input.up > 0 && !player.fly) setFly(true); // Space/E while walking takes off; on a phone it's the mode button
-    player.update(dt, input.move, input.up, input.yaw, input.pitch);
-    if (!player.fly && player.pos.y < bounds.min.y - 10) { // walked into a hole: back to where we last stood (flying goes anywhere)
-      if (player.lastFloor) {
-        player.pos.copy(player.lastFloor);
-        player.vy = 0;
-        player.grounded = false;
-      } else resetView();
-    }
+    fly(dt, input.move, input.up, input.yaw, input.pitch);
   }
-  camera.position.set(player.pos.x, player.pos.y + EYE, player.pos.z);
   camera.rotation.set(input.pitch, input.yaw, 0);
   if (!hud.hidden && t - hudAt > 100) { // ~10Hz: a DOM write every frame is wasted on numbers nobody reads that fast
     hudAt = t;
@@ -290,7 +294,7 @@ function idb(mode, fn) {
   });
 }
 
-window.app = { player, input, open, bounds, start, camera }; // for tests and the console
+window.app = { input, open, bounds, start, camera, fly }; // for tests and the console
 
 // Set while reopening the saved scan, cleared once a few frames are drawn. Still there at start-up means
 // that attempt killed the tab (usually memory), so ask instead of crashing in a loop.
