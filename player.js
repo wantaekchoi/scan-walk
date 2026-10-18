@@ -15,6 +15,7 @@ export class Player {
   grounded = false;
   lastFloor = null; // where the feet last stood, for climbing back out of a hole
   bvh = null; // MeshBVH of the world-space collider
+  bounds = new Box3(); // of the collider
 
   // move: {x: right, y: forward} with length <= 1, up: -1..1, yaw: camera.
   // Moves stay level whatever the view pitch, flying too: a drone tilts its camera, not its course.
@@ -30,12 +31,15 @@ export class Player {
     for (let i = 0; i < n; i++) {
       if (this.fly) {
         this.pos.addScaledVector(dir, FLY * h);
-        const dy = up * CLIMB * h;
-        // flying passes through walls, but going down settles on whatever is under the feet, like a drone landing
-        ray.origin.set(this.pos.x, this.pos.y + 0.01, this.pos.z);
+        const y = this.pos.y + up * CLIMB * h;
+        // flying passes through walls but not down through floors, like a drone landing. The ray starts STEP up,
+        // as walking's: a scanned floor has no underside, so feet a little under one (noise, a sill) still land on it
+        ray.origin.set(this.pos.x, this.pos.y + STEP, this.pos.z);
         ray.direction.set(0, -1, 0);
-        const hit = dy < 0 && this.bvh?.raycastFirst(ray, DoubleSide, 0, 0.01 - dy);
-        this.pos.y = hit ? hit.point.y : this.pos.y + dy;
+        const hit = this.bvh && this.floorAlong(ray);
+        // over a hole in the floor (real scans have them), a scan with a floor keeps the feet from sinking below its bottom
+        const floor = hit ? hit.point.y : this.lastFloor ? Math.min(this.pos.y, this.bounds.min.y) : -Infinity;
+        this.pos.y = Math.max(y, floor);
         this.vy = 0;
         this.grounded = false;
         continue;
@@ -49,6 +53,20 @@ export class Player {
       this.vy += GRAVITY * h;
       this.pos.y += this.vy * h;
       if (this.bvh) this.collide();
+    }
+  }
+
+  // first floor along the ray: a face turned up, with the eye still under the top of the scan, or low enough
+  // to be ground and not a ceiling (a scan lower than the eye, a terrace or a floor only, has no headroom anywhere)
+  floorAlong(ray) {
+    for (let near = 0; ;) {
+      const hit = this.bvh.raycastFirst(ray, DoubleSide, near);
+      if (!hit) return null;
+      const n = hit.face.normal, y = hit.point.y;
+      if (n.dot(ray.direction) > 0) n.negate();
+      if (n.y < 0.5) return null; // floors only
+      if (y + EYE <= this.bounds.max.y || y < this.bounds.min.y + EYE) return hit;
+      near = hit.distance + 0.01; // top of the ceiling seen from above it, top of a tall cupboard: look past it
     }
   }
 

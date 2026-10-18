@@ -24,7 +24,7 @@ scene.add(fix);
 const player = new Player();
 const input = setupInput(canvas, [$('lstick'), $('rstick')], teleport);
 const start = new THREE.Vector3();
-const bounds = new THREE.Box3();
+const bounds = player.bounds;
 const raycaster = new THREE.Raycaster();
 let model = null, lit = false, axis = 0, scale = 0, startOnFloor = true, saved = null;
 
@@ -166,21 +166,6 @@ async function rebuildBusy() {
   busy(null);
 }
 
-// first floor along the ray: a face turned up, with the eye still under the top of the scan
-// (else the first one turned up: a scan lower than the eye, a terrace or a floor only, has no headroom anywhere)
-function floorAlong(ray) {
-  for (let near = 0, low = null; ;) {
-    const hit = player.bvh.raycastFirst(ray, THREE.DoubleSide, near);
-    if (!hit) return low;
-    const n = hit.face.normal;
-    if (n.dot(ray.direction) > 0) n.negate();
-    if (n.y < 0.5) return null; // floors only
-    if (hit.point.y + EYE <= bounds.max.y) return hit;
-    low ??= hit;
-    near = hit.distance + 0.01; // no headroom (top of the ceiling seen from above it, top of an object): look past it
-  }
-}
-
 // straight down from the centre, else from a 33x33 grid over the scan, nearest the centre first:
 // real scans have holes, and a bit scanned through a window moves the box centre off the floor
 function startFloor(centre, size) {
@@ -190,7 +175,7 @@ function startFloor(centre, size) {
   pts.sort((a, b) => Math.hypot(...a) - Math.hypot(...b)); // [0, 0] first
   for (const [dx, dz] of pts) {
     ray.origin.set(centre.x + dx, centre.y, centre.z + dz);
-    const hit = floorAlong(ray);
+    const hit = player.floorAlong(ray);
     if (hit) return hit;
   }
   return null;
@@ -199,7 +184,7 @@ function startFloor(centre, size) {
 function teleport(x, y) {
   if (!player.bvh) return;
   raycaster.setFromCamera({ x: (x / innerWidth) * 2 - 1, y: -(y / innerHeight) * 2 + 1 }, camera);
-  const hit = floorAlong(raycaster.ray);
+  const hit = player.floorAlong(raycaster.ray);
   if (!hit) return;
   player.pos.copy(hit.point);
   player.vy = 0;
