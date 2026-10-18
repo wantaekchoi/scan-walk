@@ -217,6 +217,19 @@ $('forget').onclick = forget;
 $('again-forget').onclick = () => { forget(); $('msg').textContent = ''; };
 $('reopen').onclick = reopen;
 
+// camera readout (좌표 / C): eye position in m, view angles in degrees; remembered, hidden at first
+const hud = $('hud'), COORDS = 'scan-walk-coords';
+let hudAt = -Infinity;
+function showCoords(on) {
+  hud.hidden = !on;
+  $('coords').setAttribute('aria-pressed', on);
+  hudAt = -Infinity; // write it on the next frame, not up to 100ms later
+  try { on ? localStorage.setItem(COORDS, '1') : localStorage.removeItem(COORDS); } catch {}
+}
+try { showCoords(!!localStorage.getItem(COORDS)); } catch { showCoords(false); }
+$('coords').onclick = () => showCoords(hud.hidden);
+addEventListener('keydown', e => { if (e.code === 'KeyC' && !e.repeat) showCoords(hud.hidden); });
+
 // a focused button would also fire on Space (take off / fly up)
 document.addEventListener('click', e => e.target.closest?.('button')?.blur());
 addEventListener('dragover', e => e.preventDefault());
@@ -262,6 +275,12 @@ renderer.setAnimationLoop(t => {
   }
   camera.position.set(player.pos.x, player.pos.y + EYE, player.pos.z);
   camera.rotation.set(input.pitch, input.yaw, 0);
+  if (!hud.hidden && t - hudAt > 100) { // ~10Hz: a DOM write every frame is wasted on numbers nobody reads that fast
+    hudAt = t;
+    const p = camera.position, r = camera.rotation, deg = THREE.MathUtils.radToDeg;
+    hud.textContent = `x ${p.x.toFixed(2)}  y ${p.y.toFixed(2)}  z ${p.z.toFixed(2)} m\n` +
+      `pitch ${deg(r.x).toFixed(1)}°  yaw ${(THREE.MathUtils.euclideanModulo(deg(r.y) + 180, 360) - 180).toFixed(1)}°  roll ${deg(r.z).toFixed(1)}°`;
+  }
   renderer.render(scene, camera);
 });
 

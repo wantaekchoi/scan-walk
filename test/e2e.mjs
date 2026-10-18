@@ -48,6 +48,13 @@ const state = page => page.evaluate(() => {
   return { pos: player.pos.toArray().map(r), yaw: r(input.yaw), pitch: r(input.pitch), fly: player.fly,
     size: bounds.getSize(bounds.min.clone()).toArray().map(r), centre: bounds.getCenter(bounds.min.clone()).toArray().map(r), start: start.toArray().map(r) };
 });
+// camera readout: the numbers on screen (x y z m, pitch yaw roll deg) next to the camera's own
+const hud = page => page.evaluate(() => {
+  const e = document.getElementById('hud'), { position: p, rotation: r } = window.app.camera, deg = v => v * 180 / Math.PI;
+  return { shown: !!e && !e.hidden && e.getBoundingClientRect().height > 0, n: (e?.textContent.match(/-?\d+(\.\d+)?/g) || []).map(Number),
+    cam: [p.x, p.y, p.z, deg(r.x), ((deg(r.y) + 180) % 360 + 360) % 360 - 180, deg(r.z)], pressed: document.getElementById('coords')?.getAttribute('aria-pressed') };
+});
+const hudMatches = h => h.n.length === 6 && h.n.every((v, i) => near(v, h.cam[i], i < 3 ? 0.006 : 0.06));
 const place = (page, x, y, z, yaw = 0, pitch = 0) => page.evaluate(([x, y, z, yaw, pitch]) => {
   const { player, input } = window.app;
   player.pos.set(x, y, z); player.vy = 0; player.grounded = false; input.yaw = yaw; input.pitch = pitch;
@@ -243,6 +250,11 @@ async function objectView(page, tag) {
   await click(page, '#reset');
   s = await state(page);
   check('room scan: 처음 returns flying', s.fly && (await page.textContent('#mode')) === '비행', s);
+  const hudOff = await hud(page);
+  await hold(page, 'KeyC', 50);
+  const hudOn = await hud(page);
+  await hold(page, 'KeyC', 50);
+  check('desktop: C toggles the camera readout, hidden at first', !hudOff.shown && hudOn.shown && hudMatches(hudOn) && !(await hud(page)).shown, { hudOff, hudOn });
 
   await place(page, 0, 0, 0.75, 0, -0.5);
   await page.waitForTimeout(200);
@@ -576,6 +588,30 @@ async function objectView(page, tag) {
   await page.waitForTimeout(500);
   s = await state(page);
   check('touch: above the ceiling, double-tap reaches the floor below it', near(s.pos[1], 0, 0.02), s.pos);
+
+  // camera readout: hidden by default, 좌표 shows it, it follows the stick and the view drag, and a reload keeps it on
+  await click(page, '#reset');
+  const h0 = await hud(page);
+  check('touch: camera readout hidden by default', !h0.shown && h0.pressed === 'false', h0);
+  await page.click('#coords', { timeout: 2000 }).catch(() => {}); // a FAIL, not a crash, where it's missing
+  await page.waitForTimeout(250);
+  const h1 = await hud(page);
+  await push(L, 0, -60, 500);
+  await drag(R, 3);
+  await page.waitForTimeout(250);
+  const h2 = await hud(page);
+  await shot(page, 'm4-coords');
+  check('touch: 좌표 shows x y z and pitch yaw roll of the camera', h1.shown && h1.pressed === 'true' && hudMatches(h1), h1);
+  check('touch: the readout follows the stick and the view drag', h2.shown && hudMatches(h2) && Math.hypot(h2.n[0] - h1.n[0], h2.n[2] - h1.n[2]) > 0.5 && Math.abs(h2.n[4] - h1.n[4]) > 10, { h1: h1.n, h2: h2.n });
+  const row = await page.evaluate(() => [...document.querySelectorAll('#bar button')].filter(b => !b.hidden).map(b => { const r = b.getBoundingClientRect(); return [b.textContent, Math.round(r.top), Math.round(r.left), Math.round(r.right)]; }));
+  check('touch: 390px bar keeps every button on one row, 좌표 and 잊기 included', row.length === 8 && row.every(b => b[1] === row[0][1] && b[2] >= 0 && b[3] <= 390), row);
+  await page.reload();
+  await loaded(page);
+  await page.waitForTimeout(250); // ~10Hz readout
+  const h3 = await hud(page);
+  await page.click('#coords', { timeout: 2000 }).catch(() => {}); // a FAIL, not a crash, where it's missing
+  const h4 = await hud(page);
+  check('touch: readout stays on after a reload, 좌표 again hides it', h3.shown && hudMatches(h3) && !h4.shown && h4.pressed === 'false', { h3, h4 });
 
   // resting guides, one per thumb, low on the screen: 이동 left, 시점 right; the old ▲▼ buttons are gone
   const guides = await page.evaluate(() => [...document.querySelectorAll('.stick')].map(e => {
