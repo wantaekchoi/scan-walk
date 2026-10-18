@@ -35,11 +35,11 @@ async function newPage(opts, setup) {
 }
 const idle = page => page.waitForFunction(() => window.app && document.getElementById('busy').hidden, null, { timeout: 30000 });
 // a scan is open when its bounds hold something
-const loaded = page => page.waitForFunction(() => window.app && !window.app.bounds.isEmpty() && document.getElementById('busy').hidden && document.getElementById('intro').hidden, null, { timeout: 30000 });
+const loaded = (page, timeout = 30000) => page.waitForFunction(() => window.app && !window.app.bounds.isEmpty() && document.getElementById('busy').hidden && document.getElementById('intro').hidden, null, { timeout });
 async function load(page, file) {
   await page.evaluate(() => window.app?.bounds.makeEmpty());
   await page.setInputFiles('#file', `${A}/${file}`);
-  await loaded(page);
+  await loaded(page, 10000).catch(() => console.log('(not opened:', file, ')')); // the checks after it FAIL, the run goes on
   await page.waitForTimeout(300);
 }
 async function click(page, sel) { await page.click(sel); await idle(page); } // axis/scale rebuild behind the busy overlay
@@ -82,8 +82,8 @@ const brightness = page => page.evaluate(() => new Promise(res => requestAnimati
   res(Math.round(sum / 3 / 4096));
 })));
 // small object scan (0.6m cube): flying outside it with the whole box on screen, and 처음 comes back to that view
-async function objectView(page, tag) {
-  await load(page, 'object.usdz');
+async function objectView(page, tag, file = 'object.usdz') {
+  await load(page, file);
   const s = await state(page);
   const v = await page.evaluate(() => new Promise(res => requestAnimationFrame(() => { // right after the app's render, before the frame is cleared
     const { bounds, camera } = window.app, { min, max } = bounds;
@@ -329,6 +329,113 @@ async function objectView(page, tag) {
 
   const unexpected = warnings.filter(w => !w.includes('Texture has been resized') && !w.includes('메시가 없습니다') && !w.includes('USDAParser'));
   check('desktop: no console errors or unexpected warnings', errors.length === 0 && unexpected.length === 0, { errors, unexpected });
+  await page.context().close();
+}
+
+// ---------- point clouds: 3D Scanner App "XYZ color" (x,y,z,r,g,b, commas) and PLY (PCL ascii) ----------
+{
+  const { page, errors, warnings } = await newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true });
+  await idle(page);
+  const fs = await import('node:fs');
+  const lines = f => fs.readFileSync(`${A}/${f}`, 'latin1').split('\n').filter(l => l.trim()).length;
+  // the Points in the scene: count, colours (a hash of the attribute), size
+  const cloud = () => page.evaluate(() => {
+    let o = null;
+    window.app.model?.traverse(x => { if (x.isPoints) o = x; });
+    if (!o) return null;
+    const c = o.geometry.attributes.color;
+    let h = 0;
+    if (c) for (const v of c.array) h = (h * 31 + v) >>> 0;
+    return { n: o.geometry.attributes.position.count, color: !!c, hash: h, size: o.material.size, atten: o.material.sizeAttenuation, normals: !!o.geometry.attributes.normal };
+  });
+  await load(page, 'room.xyz');
+  let s = await state(page);
+  const xyz = await cloud(), xyzPx = await brightness(page);
+  await shot(page, 'p1-room-xyz');
+  check('xyz: every line is a point, with colours', xyz?.n === lines('room.xyz') && xyz.color, xyz);
+  const drawn = xyz && +(xyz.size * Math.tan(35 * Math.PI / 180)).toFixed(4); // what sizeAttenuation draws at fov 70
+  check('xyz: points drawn 2cm across, in metres, like a LiDAR room scan\'s 1-3cm spacing', xyz?.atten && near(drawn, 0.02, 0.0005), { drawn, ...xyz });
+  check('xyz: starts at eye height over the floor, under the middle', near(s.start[1], 1.6, 0.03) && near(s.start[0], s.centre[0], 0.01) && near(s.start[2], s.centre[2], 0.01), s);
+  check('xyz: no 조명 button for points (they are not lit)', await page.isHidden('#light'), null);
+  const sv = await saved(page);
+  check('xyz: remembered in IndexedDB', sv?.name === 'room.xyz', sv);
+
+  await load(page, 'room.ply');
+  const ply = await cloud(), plyPx = await brightness(page);
+  s = await state(page);
+  check('ply (PCL ascii, camera element after the vertices): every vertex is a point, normals dropped', ply?.n === lines('room.xyz') && ply.color && !ply.normals, ply);
+  check('the same scan as xyz and ply: same colours, same pixels', ply?.hash === xyz?.hash && xyzPx === plyPx && xyzPx > 25, { xyz: xyz?.hash, ply: ply?.hash, xyzPx, plyPx });
+  check('ply: same start as xyz', near(s.start[1], 1.6, 0.03), s.start);
+
+  // one hand moves, the other looks, the readout follows: the same as a mesh scan
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([x, y, id]) => ({ x, y, id })) });
+  await page.click('#coords', { timeout: 2000 }).catch(() => {});
+  const s0 = await state(page);
+  await touch('touchStart', [[80, 700, 1]]);
+  await touch('touchMove', [[80, 640, 1]]);
+  await page.waitForTimeout(500);
+  await touch('touchEnd', []);
+  await page.waitForTimeout(250);
+  s = await state(page);
+  const h = await hud(page);
+  check('points: the stick flies forward and the readout follows', s0.pos[2] - s.pos[2] > 0.5 && h.shown && hudMatches(h), { s0: s0.pos, pos: s.pos, h: h.n });
+  await page.click('#coords', { timeout: 2000 }).catch(() => {});
+
+  // a site with no single floor: ground sloping 0-1.5m, a mezzanine at 3.5m, a roof at 7m. Start on the ground, not in the air or under it
+  await load(page, 'site.xyz');
+  s = await state(page);
+  const floor = +(s.start[1] - 1.6).toFixed(3);
+  check('site with a sloped ground, a mezzanine and a roof: the floor found is the ground', floor >= -0.05 && floor <= 1.5, { floor, start: s.start, size: s.size });
+
+  // stray points far under the room (scanner noise) must not pull the start under it; NaN points in a PLY must not
+  // blank the screen; old Mac line ends (CR only) are still one point per line
+  const upload = async (name, text) => {
+    await page.evaluate(() => window.app.bounds.makeEmpty());
+    await page.setInputFiles('#file', { name, mimeType: 'application/octet-stream', buffer: Buffer.from(text, 'latin1') });
+    await loaded(page, 10000).catch(() => console.log('(not opened:', name, ')'));
+    await page.waitForTimeout(300);
+  };
+  const roomXyz = fs.readFileSync(`${A}/room.xyz`, 'latin1'), n = lines('room.xyz');
+  const ghosts = {};
+  for (const [name, extra] of [['5 points 4m under', '0,-4,0,9,9,9\n'.repeat(5)], ['1 point 30m under', '1,-30,1,9,9,9\n']]) {
+    await upload('ghost.xyz', roomXyz + extra);
+    ghosts[name] = (await state(page)).start[1];
+  }
+  check('xyz: stray points far under the room do not move the start', Object.values(ghosts).every(y => near(y, 1.6, 0.03)), ghosts);
+  await upload('cr.xyz', roomXyz.replace(/\n/g, '\r') + '1e999,0,0,9,9,9\r');
+  let c = await cloud();
+  check('xyz: CR-only line ends read every line, an infinite one dropped', c?.n === n, { n: c?.n, want: n });
+  const roomPly = fs.readFileSync(`${A}/room.ply`, 'latin1').split('\n');
+  const body = roomPly.findIndex(l => l === 'end_header') + 1;
+  for (let i = body; i < body + 3; i++) roomPly[i] = 'nan nan nan 0 0 0 0 0 1 0';
+  roomPly[body + 3] = 'inf 0 0 0 0 0 0 0 1 0';
+  await upload('nan.ply', roomPly.join('\n'));
+  c = await cloud();
+  s = await state(page);
+  const nanPx = await brightness(page);
+  check('ply with NaN / inf points: they are dropped, the rest drawn, start on the floor', c?.n === n - 4 && nanPx > 25 && near(s.start[1], 1.6, 0.03), { n: c?.n, want: n - 4, nanPx, start: s.start });
+
+  await objectView(page, 'points', 'object.xyz');
+  await load(page, 'object.ply');
+  s = await state(page);
+  check('object ply: starts outside it, like the xyz', !(await page.evaluate(() => window.app.bounds.containsPoint(window.app.camera.position))), s);
+
+  await load(page, 'room_y.usdz');
+  check('a mesh scan after points: 조명 is back', await page.isVisible('#light'), null);
+
+  await load(page, 'room.xyz');
+  await page.reload();
+  await loaded(page);
+  check('xyz: reopened from IndexedDB after a reload', (await cloud())?.n === lines('room.xyz'), null);
+
+  await page.setInputFiles('#file', { name: 'x.xyz', mimeType: 'text/plain', buffer: Buffer.from('no points here\n') });
+  await page.waitForSelector('#toast', { state: 'visible' });
+  check('an xyz with no points: message only, scan stays', (await page.textContent('#toast')).includes('열 수 없습니다') && (await cloud())?.n > 0, null);
+
+  const unexpected = warnings.filter(w => !w.includes('점이 없습니다') && !w.includes('USDAParser'));
+  const errs = errors.filter(e => !e.includes('Computed radius is NaN')); // PLYLoader's own, parsing nan.ply, before the app drops them
+  check('points: no console errors or unexpected warnings', errs.length === 0 && unexpected.length === 0, { errors, unexpected });
   await page.context().close();
 }
 
