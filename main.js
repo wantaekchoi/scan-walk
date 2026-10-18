@@ -217,7 +217,7 @@ function showCoords(on) {
 }
 try { showCoords(!!localStorage.getItem(COORDS)); } catch { showCoords(false); }
 $('coords').onclick = () => showCoords(hud.hidden);
-addEventListener('keydown', e => { if (e.code === 'KeyC' && !e.repeat) showCoords(hud.hidden); });
+addEventListener('keydown', e => { if (e.code === 'KeyC' && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) showCoords(hud.hidden); });
 
 // a focused button would also fire on Space (take off / fly up)
 document.addEventListener('click', e => e.target.closest?.('button')?.blur());
@@ -267,8 +267,9 @@ renderer.setAnimationLoop(t => {
   if (!hud.hidden && t - hudAt > 100) { // ~10Hz: a DOM write every frame is wasted on numbers nobody reads that fast
     hudAt = t;
     const p = camera.position, r = camera.rotation, deg = THREE.MathUtils.radToDeg;
-    hud.textContent = `x ${p.x.toFixed(2)}  y ${p.y.toFixed(2)}  z ${p.z.toFixed(2)} m\n` +
-      `pitch ${deg(r.x).toFixed(1)}°  yaw ${(THREE.MathUtils.euclideanModulo(deg(r.y) + 180, 360) - 180).toFixed(1)}°  roll ${deg(r.z).toFixed(1)}°`;
+    const f = (v, d) => (+v.toFixed(d) || 0).toFixed(d); // -0.001 reads 0.00, not -0.00
+    hud.textContent = `x ${f(p.x, 2)}  y ${f(p.y, 2)}  z ${f(p.z, 2)} m\n` +
+      `pitch ${f(deg(r.x), 1)}°  yaw ${f(THREE.MathUtils.euclideanModulo(deg(r.y) + 180, 360) - 180, 1)}°  roll ${f(deg(r.z), 1)}°`;
   }
   renderer.render(scene, camera);
 });

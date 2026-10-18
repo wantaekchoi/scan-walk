@@ -51,7 +51,7 @@ const state = page => page.evaluate(() => {
 // camera readout: the numbers on screen (x y z m, pitch yaw roll deg) next to the camera's own
 const hud = page => page.evaluate(() => {
   const e = document.getElementById('hud'), { position: p, rotation: r } = window.app.camera, deg = v => v * 180 / Math.PI;
-  return { shown: !!e && !e.hidden && e.getBoundingClientRect().height > 0, n: (e?.textContent.match(/-?\d+(\.\d+)?/g) || []).map(Number),
+  return { shown: !!e && !e.hidden && e.getBoundingClientRect().height > 0, text: e?.textContent, n: (e?.textContent.match(/-?\d+(\.\d+)?/g) || []).map(Number),
     cam: [p.x, p.y, p.z, deg(r.x), ((deg(r.y) + 180) % 360 + 360) % 360 - 180, deg(r.z)], pressed: document.getElementById('coords')?.getAttribute('aria-pressed') };
 });
 const hudMatches = h => h.n.length === 6 && h.n.every((v, i) => near(v, h.cam[i], i < 3 ? 0.006 : 0.06));
@@ -255,6 +255,20 @@ async function objectView(page, tag) {
   const hudOn = await hud(page);
   await hold(page, 'KeyC', 50);
   check('desktop: C toggles the camera readout, hidden at first', !hudOff.shown && hudOn.shown && hudMatches(hudOn) && !(await hud(page)).shown, { hudOff, hudOn });
+  await hold(page, 'KeyC', 50);
+  const combos = {};
+  for (const k of ['Meta+KeyC', 'Control+KeyC', 'Alt+KeyC']) { // each on its own: two toggles would cancel out
+    await page.keyboard.press(k);
+    await page.waitForTimeout(150);
+    combos[k] = (await hud(page)).shown;
+  }
+  check('desktop: ⌘C / Ctrl+C / Alt+C leave the readout alone', Object.values(combos).every(Boolean), combos);
+  // yaw past 180° reads as its turn the other way (4 rad = 229.2° = -130.8°); a hair under zero reads 0, not -0
+  await place(page, -0.001, 0, 0.75, 4, -0.0001);
+  await page.waitForTimeout(250);
+  const hEdge = await hud(page);
+  await hold(page, 'KeyC', 50);
+  check('desktop: readout wraps yaw to ±180 and shows no -0', near(hEdge.n[4], -130.8, 0.06) && !/-0\.0+(?![0-9])/.test(hEdge.text), hEdge.text);
 
   // no teleport: double-clicking the floor leaves you where you are
   await place(page, 0, 0, 0.75, 0, -0.5);
@@ -563,8 +577,8 @@ async function objectView(page, tag) {
   await shot(page, 'm4-coords');
   check('touch: 좌표 shows x y z and pitch yaw roll of the camera', h1.shown && h1.pressed === 'true' && hudMatches(h1), h1);
   check('touch: the readout follows the stick and the view drag', h2.shown && hudMatches(h2) && Math.hypot(h2.n[0] - h1.n[0], h2.n[2] - h1.n[2]) > 0.5 && Math.abs(h2.n[4] - h1.n[4]) > 10, { h1: h1.n, h2: h2.n });
-  const row = await page.evaluate(() => [...document.querySelectorAll('#bar button')].filter(b => !b.hidden).map(b => { const r = b.getBoundingClientRect(); return [b.textContent, Math.round(r.top), Math.round(r.left), Math.round(r.right)]; }));
-  check('touch: 390px bar keeps every button on one row, 좌표 and 잊기 included', row.length === 8 && row.every(b => b[1] === row[0][1] && b[2] >= 0 && b[3] <= 390), row);
+  const row = await page.evaluate(() => [...document.querySelectorAll('#bar button')].filter(b => !b.hidden).map(b => { const r = b.getBoundingClientRect(); return [b.textContent, Math.round(r.top), Math.round(r.left), Math.round(r.right), +r.height.toFixed(1)]; }));
+  check('touch: 390px bar keeps every button on one row, 좌표 and 잊기 included, ~39px tall', row.length === 8 && row.every(b => b[1] === row[0][1] && b[2] >= 0 && b[3] <= 390 && b[4] >= 39), row);
   await page.reload();
   await loaded(page);
   await page.waitForTimeout(250); // ~10Hz readout
