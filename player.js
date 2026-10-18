@@ -4,6 +4,8 @@ import { Vector3, Line3, Box3, Ray, DoubleSide } from 'three';
 
 export const EYE = 1.6;
 const R = 0.25, STEP = 0.3, HEAD = 1.75, GRAVITY = -20, WALK = 2, FLY = 3, CLIMB = 2, MARGIN = 0.03;
+// a skydiver's terminal speed: vy only resets on landing, so wedged in noisy geometry it would grow and so would the substeps
+const FALL = 50;
 
 const seg = new Line3(), box = new Box3(), ray = new Ray(), triPt = new Vector3(), capPt = new Vector3();
 const dir = new Vector3(), step = new Vector3(), wall = new Vector3(), nrm = new Vector3();
@@ -43,7 +45,7 @@ export class Player {
       const into = step.dot(wall);
       if (into < 0) step.addScaledVector(wall, -into);
       this.pos.addScaledVector(step, WALK * h);
-      this.vy += GRAVITY * h;
+      this.vy = Math.max(this.vy + GRAVITY * h, -FALL);
       this.pos.y += this.vy * h;
       if (this.bvh) this.collide();
     }

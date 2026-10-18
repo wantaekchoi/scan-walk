@@ -200,6 +200,16 @@ async function objectView(page, tag) {
   await page.waitForTimeout(300);
   s = await state(page);
   check('flying 12m under the scan stays there, no snap back', s.fly && near(s.pos[1], -12, 0.01), s.pos);
+  // flying passes through floors, so switching to walking with the feet under one must stand on it, not wedge in it
+  const landed = {};
+  for (const y of [-0.02, -0.7, -1]) {
+    await setMode(page, true);
+    await place(page, 0, y, 0.75);
+    await setMode(page, false);
+    await page.waitForTimeout(500);
+    landed[y] = await page.evaluate(() => { const p = window.app.player; return [+p.pos.y.toFixed(3), p.grounded, +p.vy.toFixed(2)]; });
+  }
+  check('walk from flying with the feet 2cm, 0.7m, 1m under the floor: stands on it', Object.values(landed).every(([y, g, vy]) => near(y, 0, 0.02) && g && vy === 0), landed);
 
   await click(page, '#reset');
   await setMode(page, false);

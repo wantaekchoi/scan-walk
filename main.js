@@ -192,6 +192,12 @@ function teleport(x, y) {
 }
 
 function setFly(on) {
+  // landing: flying passes through floors, so feet under one stand on it instead of wedging the capsule in it.
+  // The ray starts at the eye: the floor you look down on, not an upper storey of the scan. Above a floor you fall as before
+  if (!on && player.fly && player.bvh) {
+    const hit = player.floorAlong(new THREE.Ray(player.pos.clone().setY(player.pos.y + EYE), new THREE.Vector3(0, -1, 0)));
+    if (hit && hit.point.y > player.pos.y) player.pos.y = hit.point.y;
+  }
   player.fly = on;
   $('mode').textContent = on ? '비행' : '걷기';
 }
