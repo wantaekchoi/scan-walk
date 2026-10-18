@@ -164,11 +164,16 @@ async function rebuildBusy() {
 function teleport(x, y) {
   if (!player.bvh) return;
   raycaster.setFromCamera({ x: (x / innerWidth) * 2 - 1, y: -(y / innerHeight) * 2 + 1 }, camera);
-  const hit = player.bvh.raycastFirst(raycaster.ray, THREE.DoubleSide);
-  if (!hit) return;
-  const n = hit.face.normal;
-  if (n.dot(raycaster.ray.direction) > 0) n.negate();
-  if (n.y < 0.5) return; // floors only
+  let hit, near = 0;
+  for (;;) {
+    hit = player.bvh.raycastFirst(raycaster.ray, THREE.DoubleSide, near);
+    if (!hit) return;
+    const n = hit.face.normal;
+    if (n.dot(raycaster.ray.direction) > 0) n.negate();
+    if (n.y < 0.5) return; // floors only
+    if (hit.point.y + EYE <= bounds.max.y) break;
+    near = hit.distance + 0.01; // no headroom (top of the ceiling after an accidental ▲, top of an object): look past it
+  }
   player.pos.copy(hit.point);
   player.vy = 0;
   player.grounded = false;

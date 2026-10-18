@@ -434,6 +434,17 @@ async function objectView(page, tag) {
   s = await state(page);
   check('touch: flying, double-tap floor lands there walking', !s.fly && (await page.textContent('#mode')) === '걷기' && near(s.pos[1], 0, 0.02) && s.pos[2] < 0.45, s.pos);
 
+  // an accidental ▲ from walking goes through the ceiling in a third of a second: double-tap must still land on the floor, not on the ceiling
+  await setMode(page, true);
+  await place(page, 0, 2.9, 0.75, 0, -0.9);
+  await page.waitForTimeout(400);
+  await page.touchscreen.tap(195, 600);
+  await page.waitForTimeout(120);
+  await page.touchscreen.tap(195, 600);
+  await page.waitForTimeout(500);
+  s = await state(page);
+  check('touch: above the ceiling, double-tap lands on the floor below it', !s.fly && near(s.pos[1], 0, 0.02), s.pos);
+
   // walking: thumb on the stick, other thumb on ▲: goes forward and up at once
   await setMode(page, false);
   await page.evaluate(() => { window.app.input.pitch = 0; });
