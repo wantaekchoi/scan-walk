@@ -246,7 +246,7 @@ renderer.setAnimationLoop(t => {
     input.poll(dt);
     if (input.up > 0.5 && !player.fly) setFly(true); // left stick well up / Space while walking takes off
     player.update(dt, input.move, input.up, input.yaw);
-    if (player.pos.y < bounds.min.y - 10) { // fell through a hole: back to where we last stood
+    if (!player.fly && player.pos.y < bounds.min.y - 10) { // walked into a hole: back to where we last stood (flying goes anywhere)
       if (player.lastFloor) {
         player.pos.copy(player.lastFloor);
         player.vy = 0;

@@ -195,6 +195,11 @@ async function objectView(page, tag) {
   await page.waitForTimeout(2500);
   s = await state(page);
   check('walking off into the void returns to the last floor stood on', near(s.pos[0], 0, 0.01) && near(s.pos[1], 0, 0.02) && near(s.pos[2], 3.3, 0.01), s.pos);
+  await setMode(page, true);
+  await place(page, 0, -12, 0.75);
+  await page.waitForTimeout(300);
+  s = await state(page);
+  check('flying 12m under the scan stays there, no snap back', s.fly && near(s.pos[1], -12, 0.01), s.pos);
 
   await click(page, '#reset');
   await setMode(page, false);
