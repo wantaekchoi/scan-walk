@@ -28,7 +28,7 @@
   .stick::after { content: attr(data-label); position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 6px; font-size: 13px; white-space: nowrap; }
   .stick.on { display: block; }
   .stick.on::after { display: none; }
-  /* resting spots: the stick appears where the left thumb lands, the right thumb drags the view; these only show which side does what */
+  /* resting spots: a stick appears where each thumb lands, left moves and right turns; these only show which side does what */
   @media (pointer: coarse) {
     .stick { display: block; opacity: .4; }
     #stick { transform: translate(calc(env(safe-area-inset-left) + 92px), calc(100dvh - env(safe-area-inset-bottom) - 110px)); }

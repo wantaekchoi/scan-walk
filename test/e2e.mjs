@@ -553,7 +553,6 @@ async function objectView(page, tag, file = 'object.usdz') {
 
   await click(page, '#reset');
   s0 = await state(page);
-  await touch('touchStart', [[...L, 1]]);  await click(page, '#reset');
   s0 = await state(page);
   await touch('touchStart', [[...L, 1]]);
   await touch('touchMove', [[L[0], L[1] - 60, 1]]);
