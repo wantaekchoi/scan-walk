@@ -103,6 +103,12 @@ function setModel(group) {
     const litMats = [o.material].flat();
     const flatMats = litMats.map(m => {
       m.side = THREE.DoubleSide; // scans are single-sided and full of holes
+      if (!m.map && m.emissiveMap) { // 3D Scanner App: black diffuseColor and the photo on emissiveColor, which the lights would not shade
+        m.map = m.emissiveMap;
+        m.emissiveMap = null;
+        m.color.set(0xffffff);
+        m.emissive.set(0);
+      }
       if (m.map) m.map.anisotropy = aniso;
       return new THREE.MeshBasicMaterial({
         map: m.map, color: m.color, vertexColors: m.vertexColors, side: THREE.DoubleSide,
@@ -129,17 +135,16 @@ function rebuild() {
   player.bvh = new MeshBVH(geom);
   geom.computeBoundingBox();
   bounds.copy(geom.boundingBox);
-  // start: floor under the bounding box centre, or flying with the eye at the centre when there is none
-  bounds.getCenter(raycaster.ray.origin);
-  raycaster.ray.direction.set(0, -1, 0);
+  // start: the floor nearest below the bounding box centre, or flying with the eye at the centre when there is none
+  const centre = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
   // object, not a room: under ~2m (door height, two strides) across both ways, or narrow one way and low (a slide, a car)
   const object = Math.max(size.x, size.z) < 2 || (size.y < 2 && Math.min(size.x, size.z) < 2);
-  const hit = !object && player.bvh.raycastFirst(raycaster.ray, THREE.DoubleSide);
+  const hit = !object && startFloor(centre, size);
   startOnFloor = !!hit;
   // object: fly at its centre's height, backed off along +z (yaw 0 looks at it) until its bounding sphere fits the narrower FOV
-  if (object) raycaster.ray.origin.z += size.length() / 2 / Math.sin(Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(camera.aspect, 1)));
-  start.copy(hit ? hit.point : raycaster.ray.origin.setY(raycaster.ray.origin.y - EYE));
+  if (object) centre.z += size.length() / 2 / Math.sin(Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(camera.aspect, 1)));
+  start.copy(hit ? hit.point : centre.setY(centre.y - EYE));
   $('axis').textContent = `축 ${AXES[axis][0]}`;
   $('scale').textContent = `×${SCALES[scale]}`;
   resetView();
@@ -161,19 +166,39 @@ async function rebuildBusy() {
   busy(null);
 }
 
+// first floor along the ray: a face turned up, with the eye still under the top of the scan
+function floorAlong(ray) {
+  for (let near = 0; ;) {
+    const hit = player.bvh.raycastFirst(ray, THREE.DoubleSide, near);
+    if (!hit) return null;
+    const n = hit.face.normal;
+    if (n.dot(ray.direction) > 0) n.negate();
+    if (n.y < 0.5) return null; // floors only
+    if (hit.point.y + EYE <= bounds.max.y) return hit;
+    near = hit.distance + 0.01; // no headroom (top of the ceiling after an accidental ▲, top of an object): look past it
+  }
+}
+
+// straight down from the centre, else from a 33x33 grid over the scan, nearest the centre first:
+// real scans have holes, and a bit scanned through a window moves the box centre off the floor
+function startFloor(centre, size) {
+  const ray = new THREE.Ray(centre.clone(), new THREE.Vector3(0, -1, 0));
+  const pts = [];
+  for (let i = 0; i <= 32; i++) for (let j = 0; j <= 32; j++) pts.push([(i / 32 - 0.5) * size.x, (j / 32 - 0.5) * size.z]);
+  pts.sort((a, b) => Math.hypot(...a) - Math.hypot(...b)); // [0, 0] first
+  for (const [dx, dz] of pts) {
+    ray.origin.set(centre.x + dx, centre.y, centre.z + dz);
+    const hit = floorAlong(ray);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 function teleport(x, y) {
   if (!player.bvh) return;
   raycaster.setFromCamera({ x: (x / innerWidth) * 2 - 1, y: -(y / innerHeight) * 2 + 1 }, camera);
-  let hit, near = 0;
-  for (;;) {
-    hit = player.bvh.raycastFirst(raycaster.ray, THREE.DoubleSide, near);
-    if (!hit) return;
-    const n = hit.face.normal;
-    if (n.dot(raycaster.ray.direction) > 0) n.negate();
-    if (n.y < 0.5) return; // floors only
-    if (hit.point.y + EYE <= bounds.max.y) break;
-    near = hit.distance + 0.01; // no headroom (top of the ceiling after an accidental ▲, top of an object): look past it
-  }
+  const hit = floorAlong(raycaster.ray);
+  if (!hit) return;
   player.pos.copy(hit.point);
   player.vy = 0;
   player.grounded = false;

@@ -63,6 +63,16 @@ const saved = page => page.evaluate(() => new Promise(res => {
   };
 }));
 const marker = page => page.evaluate(() => localStorage.getItem('scan-walk-opening'));
+// mean RGB of the canvas (background 0x111111 = 17), read right after the app's render
+const brightness = page => page.evaluate(() => new Promise(res => requestAnimationFrame(() => {
+  const g = document.createElement('canvas').getContext('2d');
+  g.canvas.width = g.canvas.height = 64;
+  g.drawImage(document.getElementById('c'), 0, 0, 64, 64);
+  const px = g.getImageData(0, 0, 64, 64).data;
+  let sum = 0;
+  for (let i = 0; i < px.length; i += 4) sum += px[i] + px[i + 1] + px[i + 2];
+  res(Math.round(sum / 3 / 4096));
+})));
 // small object scan (0.6m cube): flying outside it with the whole box on screen, and 처음 comes back to that view
 async function objectView(page, tag) {
   await load(page, 'object.usdz');
@@ -260,7 +270,19 @@ async function objectView(page, tag) {
 
   await load(page, 'room_nofloor.usdz');
   s = await state(page);
-  check('no floor under the centre: starts flying with the eye at the centre', s.fly && (await page.textContent('#mode')) === '비행' && near(s.pos[1] + 1.6, s.centre[1], 0.01), s);
+  check('nowhere to stand (walls and ceiling only): starts flying with the eye at the centre', s.fly && (await page.textContent('#mode')) === '비행' && near(s.pos[1] + 1.6, s.centre[1], 0.01), s);
+
+  // 3D Scanner App export: room turned off the axes, a hole under the bounding box centre, texture on emissiveColor
+  await load(page, 'room_scanner.usdz');
+  s = await state(page);
+  const off = +Math.hypot(s.start[0] - s.centre[0], s.start[2] - s.centre[2]).toFixed(3);
+  check('scanner export: no floor under the centre, starts walking on the nearest floor', !s.fly && (await page.textContent('#mode')) === '걷기' && near(s.start[1], 0, 0.02) && off < 1, { ...s, off });
+  const unlit = await brightness(page);
+  await shot(page, 'd6b-scanner-unlit');
+  await click(page, '#light');
+  const lit = await brightness(page);
+  await click(page, '#light');
+  check('scanner export: emissive texture with black diffuse is drawn, unlit and lit', unlit > 60 && lit > 60, { unlit, lit, background: 17 });
 
   await load(page, 'room_8k.usdz');
   await page.waitForTimeout(500);

@@ -4,10 +4,12 @@ Room 6m (x) x 5m (z), walls 2.6m, door gap (0.9m x 2.1m) in the +z wall,
 box obstacle 1m cube at (1.8, 0, -1.2), step 0.18m platform at x in [-3,-1.5], z in [-2.5,-0.5].
 Outputs: room_y.usdz (upAxis Y), room_z.usdz (Z-up geometry, upAxis Z),
 room_z_mislabeled.usdz (Z-up geometry, upAxis Y declared), room_cm.usdz (centimetres, metersPerUnit 0.01),
-room_nofloor.usdz (no floor under the centre), room_8k.usdz (8192px texture),
+room_nofloor.usdz (walls and ceiling only: nowhere to stand), room_8k.usdz (8192px texture),
+room_scanner.usdz (as 3D Scanner App exports: black diffuseColor with the texture on emissiveColor,
+turned 30 deg about up, a 1.2m hole in the floor under the bounding box centre),
 object.usdz (closed 0.6m cube, centre (0.5, 0.3, -0.2): an object scan, not a room).
 """
-import os, sys, zipfile
+import math, os, sys, zipfile
 from PIL import Image, ImageDraw
 from pxr import Usd, UsdGeom, UsdShade, Sdf, UsdUtils, Gf
 
@@ -69,8 +71,8 @@ quad((-1.0, 0, Z + 1.5), (1.0, 0, Z + 1.5), (1.0, 0, Z), (-1.0, 0, Z), 'floor')
 box(1.3, 0, -1.7, 2.3, 1.0, -0.7, 'box')
 box(-3.0, 0, -2.5, -1.5, 0.18, -0.5, 'step')
 
-def write(name, up, mpu, transform, tex='texture.png', drop_floor=False):
-    f = 1 if drop_floor else 0  # the room floor is the first quad
+def write(name, up, mpu, transform, tex='texture.png', faces=slice(None), emissive=False):
+    f = range(len(counts))[faces]  # quads to keep, by index (the room floor is the first, walls end at 8)
     layer = os.path.join(out, name + '.usdc')
     stage = Usd.Stage.CreateNew(layer)
     UsdGeom.SetStageUpAxis(stage, up)
@@ -79,11 +81,11 @@ def write(name, up, mpu, transform, tex='texture.png', drop_floor=False):
     stage.SetDefaultPrim(root.GetPrim())
     mesh = UsdGeom.Mesh.Define(stage, '/Room/Scan')
     mesh.CreatePointsAttr([Gf.Vec3f(*transform(p)) for p in pts])
-    mesh.CreateFaceVertexCountsAttr(counts[f:])
-    mesh.CreateFaceVertexIndicesAttr(idx[4 * f:])
+    mesh.CreateFaceVertexCountsAttr([counts[i] for i in f])
+    mesh.CreateFaceVertexIndicesAttr([idx[4 * i + k] for i in f for k in range(4)])
     mesh.CreateSubdivisionSchemeAttr('none')
     pv = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar('st', Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.faceVarying)
-    pv.Set([Gf.Vec2f(*u) for u in st[4 * f:]])
+    pv.Set([Gf.Vec2f(*st[4 * i + k]) for i in f for k in range(4)])
     mat = UsdShade.Material.Define(stage, '/Room/Looks/Mat')
     sh = UsdShade.Shader.Define(stage, '/Room/Looks/Mat/PBR')
     sh.CreateIdAttr('UsdPreviewSurface')
@@ -96,7 +98,9 @@ def write(name, up, mpu, transform, tex='texture.png', drop_floor=False):
     tx.CreateInput('file', Sdf.ValueTypeNames.Asset).Set(tex)
     tx.CreateInput('st', Sdf.ValueTypeNames.Float2).ConnectToSource(rd.ConnectableAPI(), 'result')
     tx.CreateOutput('rgb', Sdf.ValueTypeNames.Float3)
-    sh.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).ConnectToSource(tx.ConnectableAPI(), 'rgb')
+    if emissive:
+        sh.CreateInput('diffuseColor', Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(0, 0, 0))
+    sh.CreateInput('emissiveColor' if emissive else 'diffuseColor', Sdf.ValueTypeNames.Color3f).ConnectToSource(tx.ConnectableAPI(), 'rgb')
     mat.CreateSurfaceOutput().ConnectToSource(sh.ConnectableAPI(), 'surface')
     UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(mat)
     stage.GetRootLayer().Save()
@@ -112,8 +116,19 @@ write('room_y', UsdGeom.Tokens.y, 1.0, lambda p: p)
 write('room_z', UsdGeom.Tokens.z, 1.0, zup)
 write('room_z_mislabeled', UsdGeom.Tokens.y, 1.0, zup)
 write('room_cm', UsdGeom.Tokens.y, 0.01, lambda p: tuple(c * 100 for c in p))
-write('room_nofloor', UsdGeom.Tokens.y, 1.0, lambda p: p, drop_floor=True)
+write('room_nofloor', UsdGeom.Tokens.y, 1.0, lambda p: p, faces=slice(1, 8))
 write('room_8k', UsdGeom.Tokens.y, 1.0, lambda p: p, tex='texture8k.png')
+
+# scanner export: the full floor swapped for four pieces around a hole under the turned room's bounding box centre
+a = math.radians(30)
+turn = lambda p: (p[0] * math.cos(a) + p[2] * math.sin(a), p[1], -p[0] * math.sin(a) + p[2] * math.cos(a))
+used = [turn(pts[i]) for i in idx[4:]]
+cx, cz = [(min(p[k] for p in used) + max(p[k] for p in used)) / 2 for k in (0, 2)]
+hx, hz = cx * math.cos(a) - cz * math.sin(a), cx * math.sin(a) + cz * math.cos(a)  # back into room coordinates
+x0, x1, z0, z1 = hx - 0.6, hx + 0.6, hz - 0.6, hz + 0.6
+for fx0, fz0, fx1, fz1 in [(-X, -Z, x0, Z), (x1, -Z, X, Z), (x0, -Z, x1, z0), (x0, z1, x1, Z)]:
+    quad((fx0, 0, fz1), (fx1, 0, fz1), (fx1, 0, fz0), (fx0, 0, fz0), 'floor')
+write('room_scanner', UsdGeom.Tokens.y, 1.0, turn, faces=slice(1, None), emissive=True)
 
 # object scan: one closed box, so a ray down from its centre hits its bottom like on a real scanned thing
 del pts[:], counts[:], idx[:], st[:]
