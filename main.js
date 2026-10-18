@@ -22,7 +22,7 @@ const fix = new THREE.Group(); // manual axis/scale correction on top of the fil
 scene.add(fix);
 
 const player = new Player();
-const input = setupInput(canvas, $('stick'), teleport);
+const input = setupInput(canvas, [$('lstick'), $('rstick')], teleport);
 const start = new THREE.Vector3();
 const bounds = new THREE.Box3();
 const raycaster = new THREE.Raycaster();
@@ -155,7 +155,7 @@ function resetView() {
   player.vy = 0;
   player.grounded = false;
   player.lastFloor = startOnFloor ? start.clone() : null;
-  setFly(!startOnFloor); // ▲ makes flying common: 처음 also lands a room scan back in walk mode
+  setFly(true); // every scan starts flying, a room hovering at eye height over its floor
   input.yaw = input.pitch = 0;
 }
 
@@ -177,7 +177,7 @@ function floorAlong(ray) {
     if (n.y < 0.5) return null; // floors only
     if (hit.point.y + EYE <= bounds.max.y) return hit;
     low ??= hit;
-    near = hit.distance + 0.01; // no headroom (top of the ceiling after an accidental ▲, top of an object): look past it
+    near = hit.distance + 0.01; // no headroom (top of the ceiling seen from above it, top of an object): look past it
   }
 }
 
@@ -203,14 +203,12 @@ function teleport(x, y) {
   if (!hit) return;
   player.pos.copy(hit.point);
   player.vy = 0;
-  player.grounded = false;
-  setFly(false); // double-tap while flying = land there, the way back from an accidental ▲
+  player.grounded = false; // flying stays flying, hovering at eye height over that spot
 }
 
 function setFly(on) {
   player.fly = on;
   $('mode').textContent = on ? '비행' : '걷기';
-  document.body.classList.toggle('fly', on);
 }
 
 $('open').onclick = $('intro-open').onclick = () => $('file').click();
@@ -227,11 +225,6 @@ $('reset').onclick = resetView;
 $('forget').onclick = forget;
 $('again-forget').onclick = () => { forget(); $('msg').textContent = ''; };
 $('reopen').onclick = reopen;
-for (const [id, dir] of [['up', 1], ['down', -1]]) {
-  const b = $(id);
-  b.onpointerdown = e => { b.setPointerCapture(e.pointerId); input.buttonUp = dir; };
-  b.onpointerup = b.onpointercancel = () => { input.buttonUp = 0; };
-}
 
 // a focused button would also fire on Space (take off / fly up)
 document.addEventListener('click', e => e.target.closest?.('button')?.blur());
@@ -265,9 +258,9 @@ renderer.setAnimationLoop(t => {
   timer.update(t);
   const dt = Math.min(timer.getDelta(), 0.1);
   if (player.bvh) {
-    input.poll();
-    if (input.up > 0 && !player.fly) setFly(true); // ▲ / Space while walking takes off
-    player.update(dt, input.move, input.up, input.yaw, input.pitch);
+    input.poll(dt);
+    if (input.up > 0.5 && !player.fly) setFly(true); // left stick well up / Space while walking takes off
+    player.update(dt, input.move, input.up, input.yaw);
     if (player.pos.y < bounds.min.y - 10) { // fell through a hole: back to where we last stood
       if (player.lastFloor) {
         player.pos.copy(player.lastFloor);

@@ -3,7 +3,7 @@
 import { Vector3, Line3, Box3, Ray, DoubleSide } from 'three';
 
 export const EYE = 1.6;
-const R = 0.25, STEP = 0.3, HEAD = 1.75, GRAVITY = -20, WALK = 2, FLY = 3, MARGIN = 0.03, FLY_DEADZONE = 0.2;
+const R = 0.25, STEP = 0.3, HEAD = 1.75, GRAVITY = -20, WALK = 2, FLY = 3, CLIMB = 2, MARGIN = 0.03;
 
 const seg = new Line3(), box = new Box3(), ray = new Ray(), triPt = new Vector3(), capPt = new Vector3();
 const dir = new Vector3(), step = new Vector3(), wall = new Vector3(), nrm = new Vector3();
@@ -16,22 +16,26 @@ export class Player {
   lastFloor = null; // where the feet last stood, for climbing back out of a hole
   bvh = null; // MeshBVH of the world-space collider
 
-  // move: {x: right, y: forward} with length <= 1, up: -1..1, yaw/pitch: camera
-  update(dt, move, up, yaw, pitch = 0) {
+  // move: {x: right, y: forward} with length <= 1, up: -1..1, yaw: camera.
+  // Moves stay level whatever the view pitch, flying too: a drone tilts its camera, not its course.
+  // ponytail: no inertia, stops the moment the stick is let go; ease the speed if a drone-like glide is wanted
+  update(dt, move, up, yaw) {
     // standing still on the floor: skip the shapecast, it costs ~1-2k triangle tests next to a dense scanned wall
     if (!this.fly && this.grounded && !move.x && !move.y) return;
     const s = Math.sin(yaw), c = Math.cos(yaw);
-    // fly: forward follows the view pitch past a dead zone, so looking around level doesn't drift you up or down
-    const pp = this.fly ? Math.sign(pitch) * Math.max(0, Math.abs(pitch) - FLY_DEADZONE) : 0;
-    const fh = Math.cos(pp);
-    dir.set(move.x * c - move.y * fh * s, move.y * Math.sin(pp), -move.x * s - move.y * fh * c);
+    dir.set(move.x * c - move.y * s, 0, -move.x * s - move.y * c);
     // substeps well under the radius so thin walls and floors can't be skipped, falling included
     const n = Math.ceil((Math.max(WALK, Math.abs(this.vy) - GRAVITY * dt) * dt) / (R / 2));
     const h = dt / n;
     for (let i = 0; i < n; i++) {
       if (this.fly) {
         this.pos.addScaledVector(dir, FLY * h);
-        this.pos.y += up * FLY * h;
+        const dy = up * CLIMB * h;
+        // flying passes through walls, but going down settles on whatever is under the feet, like a drone landing
+        ray.origin.set(this.pos.x, this.pos.y + 0.01, this.pos.z);
+        ray.direction.set(0, -1, 0);
+        const hit = dy < 0 && this.bvh?.raycastFirst(ray, DoubleSide, 0, 0.01 - dy);
+        this.pos.y = hit ? hit.point.y : this.pos.y + dy;
         this.vy = 0;
         this.grounded = false;
         continue;

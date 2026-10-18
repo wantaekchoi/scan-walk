@@ -23,15 +23,17 @@
   button[aria-pressed="true"] { background: rgba(240, 240, 240, .9); color: #111; }
   #bar { position: fixed; top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); left: max(10px, env(safe-area-inset-left)); display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; pointer-events: none; }
   #bar button { pointer-events: auto; }
-  #updown { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; pointer-events: none; }
-  #updown button { width: 64px; height: 64px; font-size: 22px; border-radius: 50%; pointer-events: auto; }
-  body:not(.fly) #down { visibility: hidden; } /* keeps ▲ in the same spot in both modes */
-  #stick { position: fixed; left: 0; top: 0; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .5); background: rgba(255, 255, 255, .08); pointer-events: none; display: none; opacity: .8; }
-  #stick div { position: absolute; left: 32px; top: 32px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255, 255, 255, .6); }
-  #stick.on { display: block; }
+  .stick { position: fixed; left: 0; top: 0; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .5); background: rgba(255, 255, 255, .08); pointer-events: none; display: none; opacity: .8; }
+  .stick div { position: absolute; left: 32px; top: 32px; width: 44px; height: 44px; border-radius: 50%; background: rgba(255, 255, 255, .6); }
+  .stick::after { content: attr(data-label); position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 6px; font-size: 13px; white-space: nowrap; }
+  .stick.on { display: block; }
+  .stick.on::after { display: none; }
+  /* resting spots: the sticks appear where the thumbs land in the lower half, these only show where that is */
   @media (pointer: coarse) {
-    #stick { display: block; opacity: .3; transform: translate(calc(env(safe-area-inset-left) + 92px), calc(100dvh - env(safe-area-inset-bottom) - 110px)); }
-    #stick.on { opacity: .8; }
+    .stick { display: block; opacity: .4; }
+    #lstick { transform: translate(calc(env(safe-area-inset-left) + 92px), calc(100dvh - env(safe-area-inset-bottom) - 110px)); }
+    #rstick { transform: translate(calc(100vw - env(safe-area-inset-right) - 92px), calc(100dvh - env(safe-area-inset-bottom) - 110px)); }
+    .stick.on { opacity: .8; }
   }
   #cross { position: fixed; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px; border-radius: 50%; background: rgba(255, 255, 255, .6); pointer-events: none; }
   #intro, #busy { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: rgba(17, 17, 17, .92); }
@@ -68,7 +70,8 @@
 <body>
 <canvas id="c"></canvas>
 <div id="cross"></div>
-<div id="stick"><div></div></div>
+<div id="lstick" class="stick" data-label="높이·회전"><div></div></div>
+<div id="rstick" class="stick" data-label="이동"><div></div></div>
 <div id="bar">
   <button id="open">열기</button>
   <button id="mode">걷기</button>
@@ -78,14 +81,13 @@
   <button id="reset">처음</button>
   <button id="forget" hidden>잊기</button>
 </div>
-<div id="updown"><button id="up" aria-label="위로">▲</button><button id="down" aria-label="아래로">▼</button></div>
 <div id="intro">
   <h1>scan-walk</h1>
   <p>3D Scanner App 에서 내보낸 USDZ 를 열어 걸어 다닙니다. 파일은 이 기기 밖으로 나가지 않습니다.</p>
   <button id="intro-open">USDZ 열기</button>
-  <p>폰: 왼쪽 엄지로 이동, 오른쪽 드래그로 시점, ▲ 로 날아오르기, 바닥 두 번 탭으로 순간이동(비행 중이면 내려앉기).<br>
-     PC: 파일을 끌어다 놓기. 클릭 후 마우스로 시점, WASD 이동, 더블클릭 순간이동, Space/E 로 날아오르고 비행 중 Shift/Q 로 내려가기.<br>
-     비행 중엔 위·아래를 보고 밀면 그쪽으로 오르내린다.</p>
+  <p>폰: 드론처럼 두 엄지로 조종합니다. 화면 아래 왼쪽은 위아래로 높이, 좌우로 회전, 오른쪽은 앞뒤·옆으로 이동. 위쪽을 드래그하면 시점, 바닥 두 번 탭으로 순간이동.<br>
+     PC: 파일을 끌어다 놓기. 클릭 후 마우스로 시점, WASD 이동, Space/E 위로, Shift/Q 아래로, 더블클릭 순간이동.<br>
+     날면서 시작합니다. 내려가면 바닥에 앉고, 걷기 버튼을 누르면 벽에 막히며 걷습니다.</p>
   <p id="msg"></p>
   <p id="again" hidden><button id="reopen">다시 열기</button> <button id="again-forget">잊기</button></p>
 </div>
