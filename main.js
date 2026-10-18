@@ -22,10 +22,9 @@ const fix = new THREE.Group(); // manual axis/scale correction on top of the fil
 scene.add(fix);
 
 const player = new Player();
-const input = setupInput(canvas, $('stick'), teleport);
+const input = setupInput(canvas, $('stick'));
 const start = new THREE.Vector3();
 const bounds = player.bounds;
-const raycaster = new THREE.Raycaster();
 let model = null, lit = false, axis = 0, scale = 0, startOnFloor = true, saved = null;
 
 // which file axis becomes up: rotation that maps it onto +Y
@@ -179,16 +178,6 @@ function startFloor(centre, size) {
     if (hit) return hit;
   }
   return null;
-}
-
-function teleport(x, y) {
-  if (!player.bvh) return;
-  raycaster.setFromCamera({ x: (x / innerWidth) * 2 - 1, y: -(y / innerHeight) * 2 + 1 }, camera);
-  const hit = player.floorAlong(raycaster.ray);
-  if (!hit) return;
-  player.pos.copy(hit.point);
-  player.vy = 0;
-  player.grounded = false; // flying stays flying, hovering at eye height over that spot
 }
 
 function setFly(on) {

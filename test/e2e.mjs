@@ -256,21 +256,15 @@ async function objectView(page, tag) {
   await hold(page, 'KeyC', 50);
   check('desktop: C toggles the camera readout, hidden at first', !hudOff.shown && hudOn.shown && hudMatches(hudOn) && !(await hud(page)).shown, { hudOff, hudOn });
 
+  // no teleport: double-clicking the floor leaves you where you are
   await place(page, 0, 0, 0.75, 0, -0.5);
   await page.waitForTimeout(200);
-  let before = (await state(page)).pos;
+  const before = (await state(page)).pos;
   await page.mouse.dblclick(500, 620);
   await page.waitForTimeout(300);
   s = await state(page);
-  check('double-click floor teleports onto floor', near(s.pos[1], 0, 0.02) && Math.hypot(s.pos[0] - before[0], s.pos[2] - before[2]) > 0.3 && s.pos[2] < before[2], { before, after: s.pos });
   await page.evaluate(() => document.exitPointerLock?.());
-  await place(page, 0, 0, 0.75, 0, 0.2);
-  await page.waitForTimeout(200);
-  await page.mouse.dblclick(640, 300);
-  await page.waitForTimeout(300);
-  s = await state(page);
-  await page.evaluate(() => document.exitPointerLock?.());
-  check('double-click on wall does not teleport', near(s.pos[2], 0.75, 0.02), s.pos);
+  check('double-click on the floor does not move you', `${s.pos}` === `${before}`, { before, after: s.pos });
 
   await click(page, '#light');
   await click(page, '#reset');
@@ -319,15 +313,6 @@ async function objectView(page, tag) {
   await load(page, 'room_flat.usdz');
   s = await state(page);
   check('floor only, lower than eye height: starts flying over it at its height', s.fly && near(s.start[1], 0, 0.02) && near(s.pos[1], 0, 0.02), s);
-  await place(page, 0, 0, 0.75, 0, -0.5);
-  await page.waitForTimeout(200);
-  before = (await state(page)).pos;
-  await page.mouse.dblclick(500, 620);
-  await page.waitForTimeout(300);
-  s = await state(page);
-  await page.evaluate(() => document.exitPointerLock?.());
-  check('floor only: double-click teleports onto it', near(s.pos[1], 0, 0.02) && s.pos[2] < before[2] - 0.3, { before, after: s.pos });
-
   // 3D Scanner App export: room turned off the axes, a hole under the bounding box centre, texture on emissiveColor
   await load(page, 'room_scanner.usdz');
   s = await state(page);
@@ -541,23 +526,19 @@ async function objectView(page, tag) {
   await touch('touchEnd', []);
   check('touch: blur releases the stick', a[2] < 0.6 && `${a}` === `${b}` && !stickOn, { a, b, stickOn });
 
+  // no teleport: double-tapping the floor, on the look side or the move side, leaves you where you are
   await click(page, '#reset');
-  await place(page, 0, 0, 0.75, 0, -0.6);
+  await place(page, 0, 0.5, 0.75, 0, -0.6);
   await page.waitForTimeout(200);
   s0 = await state(page);
-  await page.evaluate(() => {
-    const p = window.app.player.pos, copy = p.copy.bind(p);
-    window.__moves = 0; window.__dbl = 0;
-    p.copy = v => { window.__moves++; return copy(v); };
-    document.getElementById('c').addEventListener('dblclick', () => window.__dbl++);
-  });
-  await page.touchscreen.tap(220, 600);
-  await page.waitForTimeout(120);
-  await page.touchscreen.tap(220, 600);
-  await page.waitForTimeout(500);
+  for (const x of [300, 100]) {
+    await page.touchscreen.tap(x, 600);
+    await page.waitForTimeout(120);
+    await page.touchscreen.tap(x, 600);
+    await page.waitForTimeout(400);
+  }
   s = await state(page);
-  const counts = await page.evaluate(() => ({ teleports: window.__moves, dblclickEvents: window.__dbl }));
-  check('touch: double-tap floor teleports exactly once', near(s.pos[1], 0, 0.02) && s.pos[2] < s0.pos[2] - 0.3 && counts.teleports === 1, { before: s0.pos, after: s.pos, ...counts });
+  check('touch: double-tap on the floor does not move you', `${s.pos}` === `${s0.pos}` && s.fly, { before: s0.pos, after: s.pos });
 
   // walking: the same stick walks level, looking up included, and never takes off (that's the mode button)
   await setMode(page, false);
@@ -567,27 +548,6 @@ async function objectView(page, tag) {
   await push(L, 0, -60, 600);
   s = await state(page);
   check('touch: walking, stick forward looking up walks level, no take-off', !s.fly && (await page.textContent('#mode')) === '걷기' && near(s.pos[1], s0.pos[1], 0.02) && s.pos[2] - s0.pos[2] < -0.5, { s0: s0.pos, pos: s.pos, fly: s.fly });
-
-  // flying: double-tap the floor moves there and keeps flying, the eye at standing height
-  await setMode(page, true);
-  await place(page, 0, 0.5, 0.75, 0, -0.6);
-  await page.waitForTimeout(400);
-  await page.touchscreen.tap(220, 600);
-  await page.waitForTimeout(120);
-  await page.touchscreen.tap(220, 600);
-  await page.waitForTimeout(500);
-  s = await state(page);
-  check('touch: flying, double-tap floor moves there and keeps flying', s.fly && (await page.textContent('#mode')) === '비행' && near(s.pos[1], 0, 0.02) && s.pos[2] < 0.45, s.pos);
-
-  // flying above the ceiling: double-tap must still reach the floor, not the ceiling
-  await place(page, 0, 2.9, 0.75, 0, -0.9);
-  await page.waitForTimeout(400);
-  await page.touchscreen.tap(195, 600);
-  await page.waitForTimeout(120);
-  await page.touchscreen.tap(195, 600);
-  await page.waitForTimeout(500);
-  s = await state(page);
-  check('touch: above the ceiling, double-tap reaches the floor below it', near(s.pos[1], 0, 0.02), s.pos);
 
   // camera readout: hidden by default, 좌표 shows it, it follows the stick and the view drag, and a reload keeps it on
   await click(page, '#reset');

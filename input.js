@@ -1,4 +1,4 @@
-// Keyboard, mouse (pointer lock or drag), double-tap, and touch: one hand moves, the other looks.
+// Keyboard, mouse (pointer lock or drag), and touch: one hand moves, the other looks.
 // The left half is a move stick where the thumb lands (forward/back, sideways); the right half drags the view.
 // DEAD/EXPO: per-axis dead zone and expo curve, after DJI's defaults (expo 0.25)
 const STICK_R = 56, TAP_MS = 300, TAP_PX = 10, DEAD = 0.15, EXPO = 0.25;
@@ -7,11 +7,10 @@ const shape = v => { // dead zone, then expo: fine control near the centre, full
   return Math.sign(v) * ((1 - EXPO) * a + EXPO * a ** 3);
 };
 
-export function setupInput(canvas, stickEl, onTeleport) {
+export function setupInput(canvas, stickEl) {
   const s = { yaw: 0, pitch: 0, move: { x: 0, y: 0 }, up: 0 };
   const keys = new Set();
   const ptrs = new Map(); // pointerId -> { x, y, x0, y0, t0, stick }
-  let lastTap = null, lockedAt = 0, lastType = '';
   const stick = { el: stickEl, x: 0, y: 0 };
 
   const look = (dx, dy, k) => {
@@ -30,7 +29,6 @@ export function setupInput(canvas, stickEl, onTeleport) {
 
   canvas.addEventListener('pointerdown', e => {
     try { canvas.setPointerCapture(e.pointerId); } catch {} // throws while pointer-locked
-    lastType = e.pointerType;
     // left half: the move stick, where the thumb lands; the right half, or a second finger on the left, looks
     const on = e.pointerType !== 'mouse' && e.clientX < innerWidth / 2 && ![...ptrs.values()].some(p => p.stick);
     ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now(), stick: on });
@@ -63,36 +61,15 @@ export function setupInput(canvas, stickEl, onTeleport) {
     if (!p) return;
     ptrs.delete(e.pointerId);
     if (p.stick) hideStick();
-    const tap = e.type === 'pointerup' && performance.now() - p.t0 < TAP_MS &&
+    // a click (not a drag-look) locks the pointer; the browser may refuse (iOS, iframes) and drag-look still works
+    const click = e.type === 'pointerup' && e.pointerType === 'mouse' && performance.now() - p.t0 < TAP_MS &&
       Math.hypot(e.clientX - p.x0, e.clientY - p.y0) < TAP_PX;
-    if (!tap) return;
-    if (e.pointerType === 'mouse') {
-      // click locks the pointer; the browser may refuse (iOS, iframes) and drag-look still works
-      if (document.pointerLockElement !== canvas && canvas.requestPointerLock) {
-        try { canvas.requestPointerLock()?.catch?.(() => {}); } catch {}
-      }
-      return;
-    }
-    const now = performance.now();
-    if (lastTap && now - lastTap.t < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40) {
-      lastTap = null;
-      onTeleport(e.clientX, e.clientY);
-    } else {
-      lastTap = { t: now, x: e.clientX, y: e.clientY };
+    if (click && document.pointerLockElement !== canvas && canvas.requestPointerLock) {
+      try { canvas.requestPointerLock()?.catch?.(() => {}); } catch {}
     }
   };
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
-
-  document.addEventListener('pointerlockchange', () => {
-    lockedAt = document.pointerLockElement === canvas ? performance.now() : 0;
-  });
-  canvas.addEventListener('dblclick', e => {
-    if (lastType !== 'mouse') return; // touch double-taps are handled above; browsers also send dblclick for them
-    // locked for a while: aim with the crosshair; just locked by this double-click: where it was clicked
-    const center = lockedAt && performance.now() - lockedAt > 600;
-    onTeleport(center ? innerWidth / 2 : e.clientX, center ? innerHeight / 2 : e.clientY);
-  });
 
   addEventListener('keydown', e => { if (!e.repeat) keys.add(e.code); });
   addEventListener('keyup', e => keys.delete(e.code));
@@ -100,7 +77,6 @@ export function setupInput(canvas, stickEl, onTeleport) {
   const reset = () => {
     keys.clear();
     ptrs.clear();
-    lastTap = null;
     hideStick();
   };
   addEventListener('blur', reset);
